@@ -2,7 +2,7 @@
 // Rechenlogik: Zeiten, Ladeprüfung, Verfügbarkeit, Kombi-Touren, Kosten. Kein DOM.
 
 const SPEICHER = 'reiter-dispo-demo-v3';
-let stand;            // { alleTouren, alleSped, nr, kosten } + Tagessicht touren/sped
+let stand;            // { alleTouren, alleSped, alleAnfragen, nr, kosten } + Tagessicht touren/sped
 let datum = HEUTE;    // gewählter Tag
 let zeit = DEMO_JETZT; // aktuelle (abgespielte) Uhrzeit in Minuten
 
@@ -30,9 +30,11 @@ function neuerStand() {
   return tagesSicht({
     alleTouren: [...structuredClone(SEED_TOUREN).map((t) => ({ ...t, tag: HEUTE })), ...b.touren],
     alleSped: [...structuredClone(SEED_SPED).map((x) => ({ ...x, tag: HEUTE })), ...b.sped],
+    alleAnfragen: beispielAnfragen(),
     nr: b.nr, kosten: { ...KOSTEN_START },
   });
 }
+const beispielAnfragen = () => SEED_ANFRAGEN.map(({ tagNr, ...a }) => ({ ...a, tag: tagPlus(HEUTE, tagNr) }));
 // Beispieltouren von einer Woche zurück bis drei Wochen voraus, nah voller, fern lichter (fester Zufall)
 function beispielTage() {
   let saat = 20261006;
@@ -82,7 +84,10 @@ function laden() {
     if (s && Array.isArray(s.alleTouren) && Array.isArray(s.alleSped) && Number.isSafeInteger(s.nr) && s.nr >= 0 && s.nr < 1e6 && kostenOk(s.kosten)
       && s.alleTouren.every((t) => auftragOk(t) && istTag(t.tag) && kombiOk(t) && finde(LKW, t.lkw) && finde(FAHRER, t.fahrer))
       && s.alleSped.every((x) => auftragOk(x) && istTag(x.tag) && !('kombi' in x) && typeof x.grund === 'string')) {
-      const ids = [...s.alleTouren, ...s.alleSped].map((x) => x.id);
+      if (!('alleAnfragen' in s)) s.alleAnfragen = beispielAnfragen(); // Stand von vor dem Anfrage-Cockpit
+      const anfrageOk = (x) => auftragOk({ ...x, id: String(x?.id).replace(/^A/, 'T') }) && /^A\d{1,6}$/.test(x.id) && istTag(x.tag) && !istSonntag(x.tag) && QUELLEN.includes(x.quelle) && !('kombi' in x);
+      if (!Array.isArray(s.alleAnfragen) || !s.alleAnfragen.every(anfrageOk)) throw new Error('Anfragen ungültig');
+      const ids = [...s.alleTouren, ...s.alleSped, ...s.alleAnfragen].map((x) => x.id);
       if (new Set(ids).size !== ids.length) throw new Error('doppelte IDs');
       // Zähler hinter die höchste vorhandene Nummer setzen, damit neue IDs nie kollidieren
       s.nr = Math.max(s.nr, ...ids.map((id) => Number(id.slice(1)) || 0));
@@ -211,6 +216,38 @@ function interneAlternative(a) {
   if (a.start + dauerEinfach(a.art, a.ort) > TAG_ENDE) return null; // intern nicht mehr am selben Tag machbar
   return kandidaten(a.art, a.geraet, a.ort, a.start, a.tag || datum)
     .find((k) => k.pruefung.ergebnis === 'ok' && k.frei && k.fahrer.length) || null;
+}
+
+// ---------- Anfrage-Cockpit ----------
+// Warum kein eigener Lkw? Reihenfolge wie die Prüfung: Maße, Uhrzeit, Lkw, Fahrer
+function speditionsGrund(a) {
+  const g = finde(GERAETE, a.geraet), ergebnisse = LKW.map((l) => ladepruefung(g, l).ergebnis);
+  if (!ergebnisse.includes('ok')) return ergebnisse.includes('genehmigung') ? 'nur mit Genehmigung transportierbar (Schwertransport)' : 'passt auf keinen eigenen Lkw';
+  if (a.start + dauerEinfach(a.art, a.ort) > TAG_ENDE) return `Rückkehr erst nach ${hhmm(TAG_ENDE)} Uhr`;
+  const passend = kandidaten(a.art, a.geraet, a.ort, a.start, a.tag).filter((k) => k.pruefung.ergebnis === 'ok');
+  return passend.some((k) => k.frei) ? 'kein Fahrer mit passender Klasse frei' : 'kein passender Lkw frei';
+}
+// Je offene Anfrage ein Vorschlag: kleinster passender freier eigener Lkw, sonst Spedition mit Grund.
+// Wie bei alternativenZuweisen zählt jeder Lkw und Fahrer nur für eine Anfrage (vorläufig belegt).
+// Liefert Map Anfrage-ID → { lkw, fahrer, bis, kosten } oder { grund }.
+function anfrageVorschlaege() {
+  const ergebnis = new Map(), reserviert = [];
+  try {
+    const offen = stand.alleAnfragen.filter((a) => a.tag >= HEUTE).sort((x, y) => x.tag.localeCompare(y.tag) || x.start - y.start);
+    for (const a of offen) {
+      const k = a.start + dauerEinfach(a.art, a.ort) > TAG_ENDE ? null : kandidaten(a.art, a.geraet, a.ort, a.start, a.tag)
+        .filter((x) => x.pruefung.ergebnis === 'ok' && x.frei && x.fahrer.length)
+        .sort((x, y) => x.lkw.nutzlast - y.lkw.nutzlast)[0];
+      if (!k) { ergebnis.set(a.id, { grund: speditionsGrund(a) }); continue; }
+      const platzhalter = { ...a, id: '_anf' + a.id, lkw: k.lkw.id, fahrer: k.fahrer[0].id };
+      stand.alleTouren.push(platzhalter);
+      reserviert.push(platzhalter);
+      ergebnis.set(a.id, { lkw: k.lkw, fahrer: k.fahrer[0], bis: ende(platzhalter), kosten: kostenIntern(platzhalter) });
+    }
+  } finally {
+    stand.alleTouren = stand.alleTouren.filter((t) => !reserviert.includes(t));
+  }
+  return ergebnis;
 }
 
 // Alle Speditionsaufträge zugleich: jeder freie Lkw und Fahrer zählt nur für einen Auftrag.

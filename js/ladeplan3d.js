@@ -9,6 +9,7 @@ function ladeplanOeffnen(lkwId, geraetIds, auftrag) {
   lp.lkw = lkwId;
   lp.geraete = geraetIds.slice(0, LP_MAX);
   if (auftrag) lp.auftrag = { art: auftrag.art, ort: auftrag.ort, start: auftrag.start, tag: auftrag.tag };
+  lp.anfrage = auftrag?.anfrage || null; // aus dem Cockpit über „Anders planen“ gekommen: nach dem Einplanen erledigt
   document.querySelectorAll('dialog[open]').forEach((d) => d.close());
   waehleAnsicht('ladeplan');
 }
@@ -156,7 +157,7 @@ function renderLpPlanung() {
   const l = finde(LKW, lp.lkw), a = lpAuftrag();
   $('#lp-tag').min = HEUTE;
   $('#lp-tag').value = a.tag;
-  const pruefungen = [];
+  const pruefungen = istSonntag(a.tag) ? [['nein', 'Sonntags wird nicht gefahren (Lkw-Fahrverbot)']] : [];
   let fahrer = [];
   if (lp.geraete.length !== 1) {
     pruefungen.push(['nein', lp.geraete.length ? 'Für eine Tour genau ein Gerät aufladen (Sammeltouren folgen später).' : 'Erst ein Gerät aufladen.']);
@@ -182,6 +183,8 @@ function lpPlanungAufbauen() {
   $('#lp-start').addEventListener('change', () => { lp.auftrag.start = feldMinuten('#lp-start'); renderLpPlanung(); });
   $('#lp-tag').addEventListener('change', (e) => { if (istTag(e.target.value) && e.target.value >= HEUTE) lp.auftrag.tag = e.target.value; renderLpPlanung(); });
   $('#lp-einplanen').addEventListener('click', () => {
-    if (!tourAnlegen(lpAuftrag(), lp.lkw, $('#lp-fahrer').value)) renderLpPlanung();
+    const anfrage = lp.anfrage; // tourAnlegen wechselt zur Tourenansicht und löscht dabei den Bezug
+    if (!tourAnlegen(lpAuftrag(), lp.lkw, $('#lp-fahrer').value)) { renderLpPlanung(); return; }
+    if (anfrage) { anfrageEntfernen(anfrage); speichern(); }
   });
 }

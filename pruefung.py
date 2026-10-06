@@ -256,7 +256,7 @@ with sync_playwright() as p:
     ipad.screenshot(path=str(aus / 'ipad_hoch.png'))
 
     # Tablet: jede Ansicht in drei iPad-Größen auf Überlappung, Überstand, Fingergröße und passende Kopfzeile prüfen
-    MIT_ZEIT, MIT_NEU = {'dashboard', 'plantafel', 'hof'}, {'dashboard', 'plantafel'}
+    MIT_ZEIT, MIT_NEU = {'dashboard', 'plantafel', 'board', 'hof'}, {'dashboard', 'plantafel'}
     LAYOUT_JS = """(() => {
       const sichtbar = (e) => { const r = e.getBoundingClientRect(), s = getComputedStyle(e); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && !e.closest('[hidden], dialog:not([open])'); };
       const dialog = document.querySelector('dialog[open]');               // offener Dialog: nur dessen Inhalt zählt
@@ -281,7 +281,7 @@ with sync_playwright() as p:
         t = b.new_page(viewport={'width': tw, 'height': th}, has_touch=True)
         t.on('pageerror', lambda e: fehler.append(f'Tablet: {e}'))
         t.goto(seite); t.wait_for_timeout(3500)
-        for v in ['dashboard', 'plantafel', 'hof', 'ladeplan', 'spedition', 'kosten', 'fuhrpark']:
+        for v in ['anfragen', 'dashboard', 'plantafel', 'board', 'hof', 'ladeplan', 'spedition', 'kosten', 'fuhrpark']:
             t.click(f'.icons [data-ansicht="{v}"]'); t.wait_for_timeout(900)
             z = t.evaluate(LAYOUT_JS)
             pruefe(f'Tablet {tw}x{th} {v}: nichts überlappt oder ragt heraus {z["ueberlappt"][:3]}{z["raus"][:3]}', not z['ueberlappt'] and not z['raus'] and z['breite'] <= tw)
@@ -359,11 +359,110 @@ with sync_playwright() as p:
     pg.click('#tag-heute'); pg.wait_for_timeout(300)
     pruefe('Heute: Uhrzeit wieder sichtbar', pg.locator('.zeitleiste').is_visible())
 
+    # Board: jede Tour genau in der Spalte ihres Zustands, läuft mit der Uhrzeit
+    pg.evaluate("localStorage.clear()"); pg.reload(); pg.wait_for_timeout(3000)
+    ansicht(pg, 'board')
+    spalten = lambda: pg.evaluate("Object.fromEntries([...document.querySelectorAll('.bspalte')].map(s => [s.dataset.spalte, [...s.querySelectorAll('.bkarte')].map(k => k.dataset.tour)]))")
+    pruefe('Board: Uhrzeit sichtbar, Datumswahl sichtbar', pg.locator('.zeitleiste').is_visible() and pg.locator('.datumswahl').is_visible())
+    for minuten in [7 * 60 + 25, 9 * 60 + 10, 12 * 60]:
+        zeit(pg, minuten); s = spalten()
+        alle = sum(s.values(), [])
+        stimmig = pg.evaluate("""(s) => Object.entries(s).every(([k, ids]) => ids.every(id => { const t = stand.touren.find(x => x.id === id), p = phaseUm(t);
+            return k === 'geplant' ? zeit < t.start : k === 'erledigt' ? ende(t) <= zeit : k === 'unterwegs' ? p?.typ === 'fahrt' : k === 'hof' ? p?.typ === 'laden' && p.wo === 'hof' : p?.typ === 'laden' && p.wo !== 'hof'; }))""", s)
+        pruefe(f'Board {minuten // 60}:{minuten % 60:02d}: jede Tour genau einmal, Spalte passt zur Phase ({ {k: len(v) for k, v in s.items()} })',
+               sorted(alle) == sorted(pg.evaluate('stand.touren.map(t => t.id)')) and stimmig)
+        if minuten == 7 * 60 + 25: pruefe('Board 7:25: Lkw laden am Hof', len(s['hof']) >= 2)
+    pg.click('.bspalte[data-spalte="unterwegs"] .bkarte >> nth=0'); pg.wait_for_timeout(300)
+    pruefe('Board: Klick öffnet die Tour', pg.locator('#dlg-tour').is_visible()); pg.click('#dlg-tour [data-schliessen]')
+    pg.click('#tag-vor'); pg.wait_for_timeout(300); s = spalten()
+    pruefe('Board morgen: alles geplant', len(s['geplant']) > 0 and all(not s[k] for k in ['hof', 'unterwegs', 'kunde', 'erledigt']))
+    pg.evaluate("datumSetzen(tagPlus(HEUTE, -1))"); pg.wait_for_timeout(300); s = spalten()
+    pruefe('Board gestern: alles erledigt', len(s['erledigt']) > 0 and all(not s[k] for k in ['geplant', 'hof', 'unterwegs', 'kunde']))
+    pg.click('#tag-heute'); pg.wait_for_timeout(300)
+
+    # Anfrage-Cockpit: Vorschlag je Anfrage, eigener Lkw zuerst, Spedition nur mit Grund
+    ansicht(pg, 'anfragen')
+    pruefe('Anfragen: 7 offen, 5 mit eigenem Lkw, 2 an Spedition',
+           pg.locator('.anfrage').count() == 7 and pg.locator('[data-einplanen]').count() == 5 and pg.locator('[data-spedition]').count() == 2)
+    pruefe('Anfragen: Datumswahl und Uhrzeit ausgeblendet', not pg.locator('.datumswahl').is_visible() and not pg.locator('.zeitleiste').is_visible())
+    vs = pg.evaluate("""(() => { const v = anfrageVorschlaege(), a = stand.alleAnfragen;
+        const paare = []; for (const x of a) for (const y of a) if (x.id < y.id && x.tag === y.tag && v.get(x.id).lkw && v.get(y.id).lkw
+          && ueberlappt(x.start, v.get(x.id).bis, y.start, v.get(y.id).bis)) paare.push(v.get(x.id).lkw.id !== v.get(y.id).lkw.id && v.get(x.id).fahrer.id !== v.get(y.id).fahrer.id);
+        const passt = a.every(x => { const s = v.get(x.id); return !s.lkw || (ladepruefung(finde(GERAETE, x.geraet), s.lkw).ergebnis === 'ok' && lkwFrei(s.lkw.id, x.start, s.bis, [], x.tag)
+          && fahrerFrei(s.fahrer.id, x.start, s.bis, [], x.tag) && darfFahren(s.fahrer, s.lkw)); });
+        return { paare, passt, platzhalter: stand.alleTouren.some(t => t.id.startsWith('_')), gruende: a.filter(x => !v.get(x.id).lkw).map(x => v.get(x.id).grund) }; })()""")
+    pruefe(f'Anfragen: zeitgleiche Vorschläge teilen weder Lkw noch Fahrer ({len(vs["paare"])} Paare)', vs['paare'] and all(vs['paare']))
+    pruefe('Anfragen: jeder Lkw-Vorschlag passt ohne Genehmigung, ist frei und hat einen berechtigten Fahrer', vs['passt'])
+    pruefe('Anfragen: keine Platzhalter-Touren übrig', not vs['platzhalter'])
+    pruefe(f'Anfragen: Spedition nur mit Grund ({vs["gruende"]})', all(vs['gruende']) and any('Genehmigung' in g for g in vs['gruende']))
+    lkw_a01 = pg.evaluate("anfrageVorschlaege().get('A01').lkw.id")
+    n0 = pg.evaluate('stand.alleTouren.length')
+    pg.click('[data-einplanen="A01"]'); pg.wait_for_timeout(400)
+    neu = pg.evaluate("stand.alleTouren.at(-1)")
+    pruefe('Anfragen: Einplanen legt die vorgeschlagene Tour an und entfernt die Anfrage',
+           pg.evaluate('stand.alleTouren.length') == n0 + 1 and neu['lkw'] == lkw_a01 and neu['ort'] == 'bo' and neu['start'] == 14 * 60 + 30
+           and pg.locator('[data-anfrage="A01"]').count() == 0 and 'Eingeplant' in pg.inner_text('#anf-meldung') and pg.evaluate('ansicht') == 'anfragen')
+    s0 = pg.evaluate('stand.alleSped.length')
+    pg.click('[data-spedition="A04"]'); pg.wait_for_timeout(400)
+    pruefe('Anfragen: An Spedition legt Auftrag mit Grund an', pg.evaluate('stand.alleSped.length') == s0 + 1
+           and 'Genehmigung' in pg.evaluate('stand.alleSped.at(-1).grund') and pg.locator('[data-anfrage="A04"]').count() == 0)
+    pg.locator('[data-anfrage="A06"] button', has_text='Anders planen').click(); pg.wait_for_timeout(300)
+    pruefe('Anfragen: Anders planen füllt den Dialog vor', pg.locator('#dlg-neu').is_visible() and pg.input_value('#f-tag') == pg.evaluate("tagPlus(HEUTE, 2)")
+           and pg.input_value('#f-start') == '08:00' and pg.input_value('#f-geraet') == 'G07' and pg.input_value('#f-art') == 'Abholung')
+    pg.click('#dlg-neu [data-schliessen]'); pg.wait_for_timeout(200)
+    ansicht(pg, 'dashboard'); pg.click('#neu-knopf'); pg.wait_for_timeout(300)
+    pg.locator('#f-kandidaten [data-einplanen]').first.click(); pg.wait_for_timeout(600)
+    pruefe('Anfragen: Dialog ohne Planen geschlossen, spätere Tour entfernt die Anfrage nicht', pg.evaluate("stand.alleAnfragen.some(a => a.id === 'A06')"))
+    ansicht(pg, 'anfragen')
+    pg.locator('[data-anfrage="A05"] button', has_text='Anders planen').click(); pg.wait_for_timeout(300)
+    pg.locator('#f-kandidaten [data-einplanen]').first.click(); pg.wait_for_timeout(600)
+    pruefe('Anfragen: Planen im Dialog entfernt die Anfrage', not pg.evaluate("stand.alleAnfragen.some(a => a.id === 'A05')") and pg.evaluate('ansicht') == 'dashboard')
+    ansicht(pg, 'anfragen')
+    pg.locator('[data-anfrage="A06"] button', has_text='Anders planen').click(); pg.wait_for_timeout(300)
+    pg.locator('#f-kandidaten button[title="Im 3D-Ladeplan weiterplanen"]').first.click(); pg.wait_for_timeout(800)
+    n0 = pg.evaluate('stand.alleTouren.length'); pg.click('#lp-einplanen'); pg.wait_for_timeout(600)
+    pruefe('Anfragen: Weg über den 3D-Ladeplan entfernt die Anfrage nach dem Einplanen',
+           pg.evaluate('stand.alleTouren.length') == n0 + 1 and not pg.evaluate("stand.alleAnfragen.some(a => a.id === 'A06')"))
+    ansicht(pg, 'anfragen')
+    pg.locator('[data-anfrage="A03"] button', has_text='Anders planen').click(); pg.wait_for_timeout(300)
+    pg.locator('#f-kandidaten button[title="Im 3D-Ladeplan weiterplanen"]').first.click(); pg.wait_for_timeout(800)
+    ansicht(pg, 'dashboard'); ansicht(pg, 'ladeplan', 800)
+    n0 = pg.evaluate('stand.alleTouren.length'); pg.click('#lp-einplanen'); pg.wait_for_timeout(600)
+    pruefe('Anfragen: Ladeplan verlassen und später einplanen entfernt die Anfrage nicht',
+           pg.evaluate('stand.alleTouren.length') == n0 + 1 and pg.evaluate("stand.alleAnfragen.some(a => a.id === 'A03')"))
+    ansicht(pg, 'anfragen')
+    offen =pg.evaluate('stand.alleAnfragen.map(a => a.id).sort().join()')
+    pg.reload(); pg.wait_for_timeout(2000)
+    pruefe('Anfragen: Stand bleibt nach Neuladen erhalten', pg.evaluate('stand.alleAnfragen.map(a => a.id).sort().join()') == offen and offen.count('A') == 3)
+    # Speicher: Stand ohne Anfragen bekommt die Beispielanfragen, kaputte Anfrage führt zu Beispieldaten
+    basis = "alleTouren:[{id:'T101',tag:'2026-10-06',lkw:'L01',fahrer:'F09',geraet:'G12',ort:'du',art:'Abholung',start:600}], alleSped:[], nr:101, kosten:{fahrerStunde:38,spedKm:2.4,spedGrund:140,schwerFaktor:2.5,arbeitstage:21}"
+    pg.evaluate(f"localStorage.setItem('{SPEICHER}', JSON.stringify({{{basis}}}))"); pg.reload(); pg.wait_for_timeout(1500)
+    pruefe('Speicher ohne Anfragen: Touren übernommen, Beispielanfragen ergänzt', pg.evaluate('stand.alleTouren.length') == 1 and pg.evaluate('stand.alleAnfragen.length') == 7)
+    pg.evaluate(f"localStorage.setItem('{SPEICHER}', JSON.stringify({{{basis}, alleAnfragen:[{{id:'A1',tag:'2026-10-06',geraet:'G01',ort:'zz',art:'Abholung',start:600,quelle:'Miete'}}]}}))"); pg.reload(); pg.wait_for_timeout(1500)
+    pruefe('Speicher mit kaputter Anfrage: Beispieldaten statt Absturz', pg.evaluate('stand.alleTouren.length') > 100 and pg.evaluate('stand.alleAnfragen.length') == 7)
+    pg.evaluate(f"localStorage.setItem('{SPEICHER}', JSON.stringify({{{basis}, alleAnfragen:[{{id:'A1',tag:'2026-10-11',geraet:'G12',ort:'ob',art:'Abholung',start:600,quelle:'Miete'}}]}}))"); pg.reload(); pg.wait_for_timeout(1500)
+    pruefe('Speicher mit Sonntagsanfrage: Beispieldaten statt Sonntagsvorschlag', pg.evaluate('stand.alleTouren.length') > 100 and pg.evaluate("!stand.alleAnfragen.some(a => istSonntag(a.tag))"))
+    pg.evaluate(f"localStorage.setItem('{SPEICHER}', JSON.stringify({{{basis}, alleAnfragen:[{{id:'A1',tag:'2026-10-07',geraet:'G12',ort:'ob',art:'Abholung',start:600,quelle:'Miete',kombi:{{ort:'zz',geraet:'G01'}}}}]}}))"); pg.reload(); pg.wait_for_timeout(1500)
+    ansicht(pg, 'anfragen')
+    pruefe('Speicher mit Kombi-Feld an einer Anfrage: Beispieldaten, Anfragen-Ansicht läuft', pg.evaluate('stand.alleTouren.length') > 100 and pg.locator('.anfrage').count() == 7)
+
+    # Sonntag: Lkw-Fahrverbot, weder eigener Lkw noch Spedition
+    pg.evaluate("localStorage.clear()"); pg.reload(); pg.wait_for_timeout(2000)
+    pruefe('Sonntag: tourSpeichern lehnt ab', pg.evaluate("tourSpeichern({art:'Abholung',geraet:'G12',ort:'ob',start:600,tag:'2026-10-11'},'L01','F09')") is None)
+    pg.click('#neu-knopf'); pg.fill('#f-tag', '2026-10-11'); pg.dispatch_event('#f-tag', 'change'); pg.wait_for_timeout(300)
+    pruefe('Sonntag: Dialog zeigt Hinweis, keine Lkw, Spedition gesperrt', 'Sonntags' in pg.inner_text('#f-info')
+           and pg.locator('#f-kandidaten [data-einplanen]').count() == 0 and pg.locator('#f-sped-knopf').is_disabled())
+    pg.fill('#f-tag', '2026-10-12'); pg.dispatch_event('#f-tag', 'change'); pg.wait_for_timeout(300)
+    pruefe('Montag danach: Spedition wieder möglich', not pg.locator('#f-sped-knopf').is_disabled())
+    pg.click('#dlg-neu [data-schliessen]')
+    pg.evaluate("ladeplanOeffnen('L01', ['G12'], {art:'Abholung', ort:'ob', start:600, tag:'2026-10-11'})"); pg.wait_for_timeout(800)
+    pruefe('Sonntag: Ladeplan sperrt das Einplanen', pg.locator('#lp-einplanen').is_disabled() and 'Sonntags' in pg.inner_text('#lp-status'))
+
     # Handy
     m = b.new_page(viewport={'width': 390, 'height': 844})
     m.on('pageerror', lambda e: fehler.append('Handy: ' + str(e)))
     m.goto(seite); m.wait_for_timeout(5000)
-    for v in ['dashboard', 'plantafel', 'hof', 'ladeplan', 'kosten']:
+    for v in ['anfragen', 'dashboard', 'plantafel', 'board', 'hof', 'ladeplan', 'kosten']:
         m.click(f'.icons [data-ansicht="{v}"]'); m.wait_for_timeout(1500)
         breite = m.evaluate('document.documentElement.scrollWidth')
         pruefe(f'Handy {v}: keine Seitenquerrollen ({breite}px)', breite <= 390)

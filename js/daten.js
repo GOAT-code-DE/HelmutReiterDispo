@@ -20,6 +20,7 @@ function kalenderwoche(tag) { // ISO-Kalenderwoche
   return 1 + Math.round((tagDatum(wochenStart(donnerstag)) - tagDatum(wochenStart(jan4))) / 604800000);
 }
 const istTag = (x) => typeof x === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x) && tagPlus(x, 0) === x;
+const istSonntag = (tag) => wochentag(tag) === 0;   // Lkw-Fahrverbot: sonntags wird nicht geplant
 const MAX_HOEHE = 4.0, MAX_BREITE = 2.55; // StVZO, darüber nur mit Genehmigung
 const LADEN_MIN = 30, KMH = 50, STRASSENFAKTOR = 1.3;
 const FS_RANG = { B: 1, C: 2, CE: 3 };
@@ -102,6 +103,18 @@ const SEED_SPED = [
   { id: 'S01', geraet: 'G06', ort: 'do', art: 'Auslieferung', start: 9 * 60,  spedition: 'Spedition Nord',  grund: 'kein Lkw frei' },
   { id: 'S02', geraet: 'G11', ort: 'k',  art: 'Auslieferung', start: 8 * 60,  spedition: 'Schwerlast West', grund: 'Überbreite 2,80 m, Schwertransport mit Genehmigung' },
   { id: 'S03', geraet: 'G02', ort: 'ms', art: 'Abholung',     start: 13 * 60, spedition: 'Spedition Nord',  grund: 'kein Fahrer verfügbar' },
+];
+
+// Offene Transportanfragen aus Miete, Verkauf und Werkstatt (Anfrage-Cockpit); tagNr relativ zu HEUTE
+const QUELLEN = ['Miete', 'Verkauf', 'Werkstatt'];
+const SEED_ANFRAGEN = [
+  { id: 'A01', tagNr: 0, geraet: 'G04', ort: 'bo', art: 'Auslieferung', start: 14 * 60 + 30, quelle: 'Miete' },
+  { id: 'A02', tagNr: 0, geraet: 'G02', ort: 'ob', art: 'Abholung',     start: 15 * 60,      quelle: 'Miete' },
+  { id: 'A03', tagNr: 0, geraet: 'G05', ort: 're', art: 'Auslieferung', start: 12 * 60,      quelle: 'Verkauf' },
+  { id: 'A04', tagNr: 1, geraet: 'G11', ort: 'k',  art: 'Auslieferung', start: 7 * 60 + 30,  quelle: 'Miete' },
+  { id: 'A05', tagNr: 1, geraet: 'G06', ort: 'do', art: 'Auslieferung', start: 9 * 60,       quelle: 'Verkauf' },
+  { id: 'A06', tagNr: 2, geraet: 'G07', ort: 'ds', art: 'Abholung',     start: 8 * 60,       quelle: 'Miete' },
+  { id: 'A07', tagNr: 3, geraet: 'G10', ort: 'ms', art: 'Abholung',     start: 10 * 60,      quelle: 'Werkstatt' },
 ];
 
 // Kostenannahmen, im Reiter „Kosten“ änderbar

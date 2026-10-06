@@ -46,11 +46,11 @@
   .app:not([data-ansicht="dashboard"]) .liste-panel { display: none; }
   .app:not([data-ansicht="dashboard"]) .haupt { grid-column: 2 / -1; }
   /* Bedienelemente der Kopfzeile nur dort, wo sie etwas bewirken */
-  .app:not([data-ansicht="dashboard"]):not([data-ansicht="plantafel"]):not([data-ansicht="hof"]) .zeitleiste { display: none; }
+  .app:not([data-ansicht="dashboard"]):not([data-ansicht="plantafel"]):not([data-ansicht="board"]):not([data-ansicht="hof"]) .zeitleiste { display: none; }
   .app:not([data-ansicht="dashboard"]):not([data-ansicht="plantafel"]) #neu-knopf { display: none; }
   .app[data-ansicht="plantafel"]:not([data-plan="tag"]) .zeitleiste { display: none; }   /* Woche/Monat: Uhrzeit ohne Bedeutung */
   .app[data-heute="nein"] .zeitleiste { display: none; }   /* Uhrzeit und Abspielen gibt es nur für heute */
-  .app[data-ansicht="ladeplan"] .datumswahl, .app[data-ansicht="fuhrpark"] .datumswahl { display: none; }
+  .app[data-ansicht="ladeplan"] .datumswahl, .app[data-ansicht="fuhrpark"] .datumswahl, .app[data-ansicht="anfragen"] .datumswahl { display: none; }
   .datumswahl { display: flex; align-items: center; gap: 6px; }
   .datumswahl input { padding: 6px 8px; border: 1px solid var(--linie); border-radius: 10px; background: #fff; font-size: 14px; min-width: 0; }
   .knopf.symbol { padding: 6px; min-width: 34px; min-height: 34px; display: inline-grid; place-items: center; }
@@ -319,6 +319,29 @@
   .sparzeile { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--linie); }
   .sparzeile p { margin: 2px 0 0; font-size: 13px; color: var(--leise); }
   .sparzeile .betrag { font-weight: 700; color: var(--gruen-dunkel); white-space: nowrap; font-size: 15px; }
+  .anf-meldung { min-height: 1.4em; margin: 0 0 4px; font-size: 13px; color: var(--gruen-dunkel); }
+  .anf-tag { margin: 16px 0 8px; font-size: 15px; }
+  .anfrage { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) auto; gap: 10px 18px; align-items: center; border: 1px solid var(--linie); border-left: 4px solid var(--gruen); border-radius: 14px; padding: 12px 14px; margin-bottom: 10px; }
+  .anfrage.abholung { border-left-color: var(--blau); }
+  .anfrage h3 { margin: 0 0 4px; font-size: 14px; }
+  .anfrage p { margin: 3px 0; font-size: 13px; color: var(--schiefer); }
+  .vorschlag { padding: 8px 10px; border-radius: 10px; font-size: 13px; }
+  .vorschlag span { display: block; margin-top: 2px; }
+  .vorschlag.eigen { background: var(--gruen-hell); color: var(--gruen-dunkel); }
+  .vorschlag.sped { background: var(--warn-hell); color: #7a4f10; }
+  .anfrage .knopfreihe { margin-top: 0; justify-content: flex-end; }
+  .anfrage .knopf { min-height: 44px; }
+  .board { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+  .bspalte { background: var(--schiefer-hell); border-radius: 14px; padding: 10px; min-height: 220px; }
+  .bspalte h2 { display: flex; align-items: center; gap: 6px; margin: 2px 4px 10px; font-size: 14px; }
+  .bspalte .anzahl { background: #fff; color: var(--schiefer); border-radius: 6px; padding: 0 6px; font-size: 12px; }
+  .bspalte .leer { margin: 4px; font-size: 12px; color: var(--schiefer); }
+  .bkarte { display: block; width: 100%; min-height: 44px; text-align: left; border: none; border-left: 4px solid var(--gruen); background: #fff; border-radius: 10px; padding: 9px 10px; margin-bottom: 8px; cursor: pointer; color: var(--text); box-shadow: 0 1px 2px rgba(20,30,40,.06); }
+  .bkarte.abholung { border-left-color: var(--blau); }
+  .bkarte.kombi { border-left-color: var(--warn); }
+  .bkarte b { display: block; font-size: 14px; font-weight: 500; }
+  .bkarte small { display: block; margin-top: 2px; font-size: 12px; color: var(--schiefer); }
+  .bkarte .bzeit { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
   .annahmen { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
   .annahmen label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--leise); }
   .annahmen input { padding: 7px; border: 1px solid var(--linie); border-radius: 8px; }
@@ -368,6 +391,10 @@
     .detailspalte .bild svg { max-height: 170px; }
     .kopf .logo { height: 22px; }
   }
+  @media (max-width: 1000px) {
+    .anfrage { grid-template-columns: 1fr; }
+    .anfrage .knopfreihe { justify-content: flex-start; }
+  }
   @media (max-width: 900px) and (min-width: 701px) {
     .app { grid-template-columns: 78px 250px minmax(0, 1fr); padding: 10px; gap: 10px; }
     .kartenpanel { height: 420px; }
@@ -401,8 +428,10 @@
 
   <nav class="icons panel" aria-label="Bereiche">
     <div class="zeichen" aria-hidden="true">HR</div>
+    <button data-ansicht="anfragen" aria-selected="false" title="Anfragen: neue Transportwünsche mit Vorschlag" aria-label="Anfragen" data-label="Anfragen" data-icon="posteingang"></button>
     <button data-ansicht="dashboard" aria-selected="true" title="Touren: Liste, Karte und Details" aria-label="Touren" data-label="Touren" data-icon="karte"></button>
     <button data-ansicht="plantafel" aria-selected="false" title="Planung: Tag, Woche, Monat" aria-label="Planung" data-label="Planung" data-icon="tafel"></button>
+    <button data-ansicht="board" aria-selected="false" title="Board: Stand jeder Tour" aria-label="Board" data-label="Board" data-icon="spalten"></button>
     <button data-ansicht="hof" aria-selected="false" title="Hof live: Rampen, Stellplätze, Stapler" aria-label="Hof" data-label="Hof" data-icon="hof"></button>
     <button data-ansicht="ladeplan" aria-selected="false" title="3D-Ladeplan: passt das Gerät auf den Lkw?" aria-label="Ladeplan" data-label="Ladeplan" data-icon="wuerfel"></button>
     <button data-ansicht="spedition" aria-selected="false" title="Aufträge an Speditionen" aria-label="Spedition" data-label="Spedition" data-icon="spedition"></button>
@@ -471,6 +500,19 @@
         <div class="abschnitt" id="tour-ablauf"></div>
         <div class="abschnitt" id="tour-kosten"></div>
       </aside>
+    </section>
+
+    <section id="v-anfragen" class="ansicht seite panel" hidden>
+      <h1>Anfragen</h1>
+      <p class="untertitel">Neue Transportwünsche aus Miete, Verkauf und Werkstatt. Zu jeder Anfrage steht ein Vorschlag: erst ein eigener Lkw, Spedition nur mit Grund.</p>
+      <p class="anf-meldung" id="anf-meldung" role="status"></p>
+      <div id="anf-liste"></div>
+    </section>
+
+    <section id="v-board" class="ansicht seite panel" hidden>
+      <h1>Board</h1>
+      <p class="untertitel">Wo steht jede Tour gerade? Das Board läuft mit der Uhrzeit mit. Ein Klick öffnet die Tour.</p>
+      <div class="board" id="board"></div>
     </section>
 
     <section id="v-plantafel" class="ansicht seite panel" hidden>

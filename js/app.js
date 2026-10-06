@@ -38,6 +38,8 @@ const ICONS = {
   aufladen: 'M12 15V4M8 8l4-4 4 4M5 20h14',
   abladen: 'M12 4v11M8 11l4 4 4-4M5 20h14',
   ziel: 'M5 21V4h11l-2 4 2 4H5',
+  posteingang: 'M3 13h5l2 3h4l2-3h5M5 5h14l2 8v6H3v-6z',
+  spalten: 'M4 4h4v16H4zM10 4h4v10h-4zM16 4h4v13h-4z',
 };
 const icon = (name) => sv('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' }, sv('path', { d: ICONS[name] }));
 
@@ -243,6 +245,7 @@ function setzeZeit(m) {
   renderListe();
   if (ansicht === 'dashboard') { renderGewaehlt(); karte3dZeit(); }
   if (ansicht === 'plantafel') renderPlan();
+  if (ansicht === 'board') renderBoard();
   if (ansicht === 'hof') hofAktualisieren();
   if (ansicht === 'fuhrpark') renderFuhrpark();
   if (ansicht === 'kosten') renderKosten();
@@ -444,11 +447,12 @@ function renderNeu() {
   const a = auftragAusFormular();
   const g = finde(GERAETE, a.geraet), ort = finde(ORTE, a.ort);
   const bis = a.start + dauerEinfach(a.art, a.ort);
-  const zuSpaet = bis > TAG_ENDE;
+  const sonntag = istSonntag(a.tag), zuSpaet = bis > TAG_ENDE || sonntag;
   $('#f-info').replaceChildren(
     el('strong', {}, g.name), ` · ${zahl(g.gewicht, 1)} t · ${zahl(g.l)} × ${zahl(g.b)} × ${zahl(g.h)} m`,
     el('br'), `${tagLang(a.tag)} · ${ort.name}, ${ort.km} km · Lkw belegt ${hhmm(a.start)}–${hhmm(bis)}`,
-    ...(zuSpaet ? [el('div', { class: 'g-nein' }, `Rückkehr nach ${hhmm(TAG_ENDE)} Uhr – bitte früher abfahren.`)] : []));
+    ...(sonntag ? [el('div', { class: 'g-nein' }, 'Sonntags wird nicht gefahren (Lkw-Fahrverbot) – bitte einen anderen Tag wählen.')]
+      : bis > TAG_ENDE ? [el('div', { class: 'g-nein' }, `Rückkehr nach ${hhmm(TAG_ENDE)} Uhr – bitte früher abfahren.`)] : []));
 
   const liste = kandidaten(a.art, a.geraet, a.ort, a.start, a.tag);
   const rang = (k) => (k.pruefung.ergebnis === 'ok' && k.frei && k.fahrer.length ? 0 : k.pruefung.ergebnis === 'ok' ? 1 : k.pruefung.ergebnis === 'genehmigung' ? 2 : 3);
@@ -461,7 +465,7 @@ function renderNeu() {
       el('div', { class: 'kz' }, el('strong', {}, k.lkw.kz), el('small', {}, `${k.lkw.typ} · ${zahl(k.lkw.nutzlast, 1)} t`)),
       el('div', { class: 'gruende' }, ...k.pruefung.gruende.map((x) => el('div', { class: 'g-' + x.art }, x.txt))),
       el('div', { class: 'aktion' },
-        el('button', { class: 'knopf zweit klein', title: 'Im 3D-Ladeplan weiterplanen', onclick: () => ladeplanOeffnen(k.lkw.id, [a.geraet], a) }, '3D'),
+        el('button', { class: 'knopf zweit klein', title: 'Im 3D-Ladeplan weiterplanen', onclick: () => ladeplanOeffnen(k.lkw.id, [a.geraet], { ...a, anfrage: anfrageImDialog }) }, '3D'),
         wahl, el('button', { class: 'knopf klein', 'data-einplanen': k.lkw.id, onclick: () => einplanen(a, k.lkw.id, wahl.value) }, 'Einplanen')));
   });
   const ausgeblendet = liste.length - passende.length;
@@ -470,12 +474,13 @@ function renderNeu() {
     ...zeilen,
     ...(ausgeblendet ? [el('p', { class: 'hinweis' }, `${ausgeblendet} weitere Lkw ausgeblendet: zu klein, nur mit Genehmigung oder zu der Zeit verplant.`)] : []));
 
-  const alt = interneAlternative(a);
+  const alt = sonntag ? null : interneAlternative(a);
   const hinweis = $('#f-sped-hinweis');
   hinweis.className = 'hinweis' + (alt ? ' warn' : '');
-  hinweis.textContent = alt
+  hinweis.textContent = sonntag ? 'Sonntags fahren auch Speditionen nicht.' : alt
     ? `Achtung: ${alt.lkw.kz} passt ohne Genehmigung und ist frei, ${alt.fahrer[0].name} könnte fahren. Der Auftrag wird als vermeidbar markiert.`
     : 'Kein eigener Lkw passt ohne Genehmigung und ist frei. Spedition ist hier begründet.';
+  $('#f-sped-knopf').disabled = sonntag;
 }
 
 // Tour anlegen, wenn alles passt (aus Dialog und 3D-Ladeplan). Liefert die neue ID oder null.
@@ -485,7 +490,7 @@ function tourSpeichern(a, lkwId, fahrerId) {
   const passt = ladepruefung(finde(GERAETE, a.geraet), finde(LKW, lkwId)).ergebnis === 'ok';
   const f = finde(FAHRER, fahrerId);
   const tag = a.tag || datum;
-  if (!passt || !f || !darfFahren(f, finde(LKW, lkwId)) || bis > TAG_ENDE || !istTag(tag) || tag < HEUTE
+  if (!passt || !f || !darfFahren(f, finde(LKW, lkwId)) || bis > TAG_ENDE || !istTag(tag) || tag < HEUTE || istSonntag(tag)
     || !lkwFrei(lkwId, a.start, bis, [], tag) || !fahrerFrei(fahrerId, a.start, bis, [], tag)) return null;
   const id = 'T' + (++stand.nr);
   stand.alleTouren.push({ id, tag, lkw: lkwId, fahrer: fahrerId, art: a.art, geraet: a.geraet, ort: a.ort, start: a.start });
@@ -500,9 +505,12 @@ function tourAnlegen(a, lkwId, fahrerId) {
   waehleTour(id);
   return id;
 }
+let anfrageImDialog = null; // Anfrage aus dem Cockpit, die gerade im Dialog „Neuer Transport“ geplant wird
 function einplanen(a, lkwId, fahrerId) {
+  const anfrage = anfrageImDialog;
   // Doppelt prüfen: der Dialog kann veraltet sein
   if (!tourAnlegen(a, lkwId, fahrerId)) { renderNeu(); return; }
+  if (anfrage) { anfrageEntfernen(anfrage); speichern(); }
   $('#dlg-neu').close();
 }
 
@@ -510,6 +518,8 @@ function anSpedition() {
   const grund = $('#f-grund').value.trim();
   if (!grund) { $('#f-grund').focus(); $('#f-grund').placeholder = 'Bitte einen Grund angeben – ohne Grund keine Spedition.'; return; }
   const a = auftragAusFormular();
+  if (istSonntag(a.tag)) { renderNeu(); return; }
+  if (anfrageImDialog) anfrageEntfernen(anfrageImDialog);
   stand.alleSped.push({ id: 'S' + (++stand.nr), spedition: 'noch offen', grund, ...a });
   datum = a.tag;
   speichern(); $('#dlg-neu').close(); allesNeu();
@@ -672,6 +682,94 @@ function annahmenAufbauen() {
       } }))));
 }
 
+// ---------- Anfrage-Cockpit ----------
+function anfrageEntfernen(id) { stand.alleAnfragen = stand.alleAnfragen.filter((x) => x.id !== id); }
+function anfrageKarte(a, v) {
+  const g = finde(GERAETE, a.geraet), o = finde(ORTE, a.ort), sped = kostenSpedition(a);
+  const vorschlag = v.lkw
+    ? el('div', { class: 'vorschlag eigen' }, el('strong', {}, `Vorschlag: ${v.lkw.kz} · ${v.lkw.typ}`),
+      el('span', {}, `${v.fahrer.name} fährt, zurück ${hhmm(v.bis)} · ca. ${euro(v.kosten)} statt ${euro(sped)} Spedition`))
+    : el('div', { class: 'vorschlag sped' }, el('strong', {}, 'Vorschlag: Spedition'), el('span', {}, `Grund: ${v.grund} · ca. ${euro(sped)}`));
+  return el('div', { class: 'anfrage' + (a.art === 'Abholung' ? ' abholung' : ''), 'data-anfrage': a.id },
+    el('div', {},
+      el('h3', {}, `${a.art} ${o.name} · ${hhmm(a.start)}`),
+      el('p', {}, `${g.name} · ${zahl(g.gewicht, 1)} t`),
+      el('p', {}, marke(a.quelle, 'grau'), ` ${o.km} km vom Hof`)),
+    vorschlag,
+    el('div', { class: 'knopfreihe' },
+      v.lkw
+        ? el('button', { class: 'knopf klein', 'data-einplanen': a.id, onclick: () => anfrageEinplanen(a) }, 'Einplanen')
+        : el('button', { class: 'knopf warn klein', 'data-spedition': a.id, onclick: () => anfrageAnSpedition(a) }, 'An Spedition'),
+      el('button', { class: 'knopf zweit klein', onclick: () => anfrageAndersPlanen(a) }, 'Anders planen')));
+}
+function renderAnfragen() {
+  const vorschlaege = anfrageVorschlaege();
+  const offen = stand.alleAnfragen.filter((a) => vorschlaege.has(a.id)).sort((x, y) => x.tag.localeCompare(y.tag) || x.start - y.start);
+  const tage = [...new Set(offen.map((a) => a.tag))];
+  $('#anf-liste').replaceChildren(...(offen.length ? tage.flatMap((tag) => [
+    el('h2', { class: 'anf-tag' }, tag === HEUTE ? `Heute, ${tagLang(tag)}` : tagLang(tag)),
+    ...offen.filter((a) => a.tag === tag).map((a) => anfrageKarte(a, vorschlaege.get(a.id))),
+  ]) : [el('p', { class: 'hinweis' }, 'Keine offenen Anfragen.')]));
+}
+// Beim Klick neu rechnen: der angezeigte Vorschlag kann inzwischen überholt sein
+function anfrageEinplanen(a) {
+  const v = anfrageVorschlaege().get(a.id);
+  const id = v?.lkw ? tourSpeichern(a, v.lkw.id, v.fahrer.id) : null;
+  if (id) { anfrageEntfernen(a.id); speichern(); }
+  $('#anf-meldung').textContent = id
+    ? `Eingeplant: ${a.art} ${finde(ORTE, a.ort).name}, ${tagKurz(a.tag)} ${hhmm(a.start)} mit ${v.lkw.kz}.`
+    : 'Der Vorschlag war nicht mehr gültig und wurde neu berechnet.';
+  allesNeu();
+}
+function anfrageAnSpedition(a) {
+  const v = anfrageVorschlaege().get(a.id);
+  if (v && !v.lkw) {
+    stand.alleSped.push({ id: 'S' + (++stand.nr), tag: a.tag, art: a.art, geraet: a.geraet, ort: a.ort, start: a.start, spedition: 'noch offen', grund: v.grund });
+    anfrageEntfernen(a.id);
+    speichern();
+  }
+  $('#anf-meldung').textContent = v && !v.lkw
+    ? `An Spedition: ${a.art} ${finde(ORTE, a.ort).name}, ${tagKurz(a.tag)} ${hhmm(a.start)}.`
+    : 'Inzwischen ist ein eigener Lkw frei, der Vorschlag wurde neu berechnet.';
+  allesNeu();
+}
+function anfrageAndersPlanen(a) {
+  $('#f-art').value = a.art; $('#f-geraet').value = a.geraet; $('#f-ort').value = a.ort;
+  $('#f-start').value = hhmm(a.start); $('#f-tag').min = HEUTE; $('#f-tag').value = a.tag;
+  $('#f-grund').value = '';
+  anfrageImDialog = a.id;
+  renderNeu();
+  $('#dlg-neu').showModal();
+}
+
+// ---------- Board: jede Tour in der Spalte ihres Zustands, läuft mit der Uhrzeit ----------
+const BOARD_SPALTEN = [['geplant', 'Geplant'], ['hof', 'Laden am Hof'], ['unterwegs', 'Unterwegs'], ['kunde', 'Beim Kunden'], ['erledigt', 'Erledigt']];
+function boardSpalte(t) {
+  const st = status(t), p = st === 'unterwegs' ? phaseUm(t) : null;
+  if (!p) return st === 'erledigt' ? 'erledigt' : 'geplant';
+  return p.typ === 'fahrt' ? 'unterwegs' : p.wo === 'hof' ? 'hof' : 'kunde';
+}
+function boardZeit(t, spalte) {
+  if (spalte === 'geplant') return `Abfahrt ${hhmm(t.start)}`;
+  if (spalte === 'erledigt') return `zurück ${hhmm(ende(t))}`;
+  const p = phaseUm(t);
+  if (p.typ === 'fahrt') return `${p.nach === 'hof' ? 'zum Hof' : 'nach ' + ortName(p.nach)}, an ${hhmm(p.bis)}`;
+  return `${p.text.replace(/ (beim Kunden|am Hof)$/, '')} bis ${hhmm(p.bis)}`;
+}
+function renderBoard() {
+  const touren = [...stand.touren].sort((a, b) => a.start - b.start);
+  $('#board').replaceChildren(...BOARD_SPALTEN.map(([key, titel]) => {
+    const liste = touren.filter((t) => boardSpalte(t) === key);
+    return el('section', { class: 'bspalte', 'data-spalte': key, 'aria-label': titel },
+      el('h2', {}, titel, el('span', { class: 'anzahl' }, String(liste.length))),
+      ...(liste.length ? liste.map((t) => el('button', {
+        class: 'bkarte ' + (t.kombi ? 'kombi' : t.art === 'Abholung' ? 'abholung' : ''), 'data-tour': t.id, onclick: () => zeigeTour(t.id),
+      }, el('b', {}, zielText(t)),
+      el('small', {}, `${finde(LKW, t.lkw).kz} · ${finde(GERAETE, t.geraet).kurz} · ${finde(FAHRER, t.fahrer).name}`),
+      el('small', { class: 'bzeit' }, boardZeit(t, key)))) : [el('p', { class: 'leer' }, 'keine')]));
+  }));
+}
+
 // ---------- 3D-Ladeplan Bedienung ----------
 function ladeplanBedienungAufbauen() {
   $('#lp-lkw').replaceChildren(...LKW.map((l) => el('option', { value: l.id }, `${l.kz} · ${l.typ}`)));
@@ -681,16 +779,19 @@ function ladeplanBedienungAufbauen() {
 }
 
 // ---------- Ansichten ----------
-const ANSICHTEN = ['dashboard', 'plantafel', 'hof', 'ladeplan', 'kosten', 'fuhrpark', 'spedition'];
+const ANSICHTEN = ['anfragen', 'dashboard', 'plantafel', 'board', 'hof', 'ladeplan', 'kosten', 'fuhrpark', 'spedition'];
 let ansicht = 'dashboard';
 function waehleAnsicht(name) {
-  if (abspielen && !['dashboard', 'plantafel', 'hof'].includes(name)) abspielenUmschalten();
+  if (abspielen && !['dashboard', 'plantafel', 'board', 'hof'].includes(name)) abspielenUmschalten();
+  if (name !== 'ladeplan') lp.anfrage = null; // Bezug zur Anfrage gilt nur, solange man im Ladeplan bleibt
   ansicht = name;
   $('.app').dataset.ansicht = name; // für Tablet-Layout: Tourenliste nur in der Tourenübersicht
   document.querySelectorAll('.icons button[data-ansicht]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.ansicht === name)));
   for (const v of ANSICHTEN) $('#v-' + v).hidden = v !== name;
   if (name === 'dashboard') { renderGewaehlt(); if (m3) m3.resize(); karte3dDaten(); }
+  if (name === 'anfragen') { $('#anf-meldung').textContent = ''; renderAnfragen(); }
   if (name === 'plantafel') renderPlan();
+  if (name === 'board') renderBoard();
   if (name === 'hof') hofAktualisieren();
   if (name === 'ladeplan') renderLadeplan();
   if (name === 'kosten') renderKosten();
@@ -703,7 +804,9 @@ function allesNeu() {
   renderKpis(); renderListe(); renderSpedition();
   if (ansicht === 'dashboard') { renderGewaehlt(); karte3dDaten(); }
   routenHolen();
+  if (ansicht === 'anfragen') renderAnfragen();
   if (ansicht === 'plantafel') renderPlan();
+  if (ansicht === 'board') renderBoard();
   if (ansicht === 'hof') hofAktualisieren();
   if (ansicht === 'kosten') renderKosten();
   if (ansicht === 'fuhrpark') renderFuhrpark();
@@ -726,10 +829,11 @@ $('#neu-knopf').addEventListener('click', () => {
   $('#dlg-neu').showModal();
 });
 $('#f-sped-knopf').addEventListener('click', anSpedition);
+$('#dlg-neu').addEventListener('close', () => { anfrageImDialog = null; });
 document.querySelectorAll('[data-schliessen]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close()));
 document.querySelectorAll('.icons button[data-ansicht]').forEach((b) => b.addEventListener('click', () => waehleAnsicht(b.dataset.ansicht)));
 $('#suche').addEventListener('input', renderListe);
-$('#reset-knopf').addEventListener('click', () => { stand = neuerStand(); speichern(); gewaehlt = standardTour(); annahmenAufbauen(); allesNeu(); fokusTour(gewaehlt); });
+$('#reset-knopf').addEventListener('click', () => { stand = neuerStand(); lp.anfrage = null; speichern(); gewaehlt = standardTour(); annahmenAufbauen(); allesNeu(); fokusTour(gewaehlt); });
 $('#zeit-regler').addEventListener('input', (e) => setzeZeit(Number(e.target.value)));
 $('#zeit-play').addEventListener('click', abspielenUmschalten);
 $('#zeit-jetzt').addEventListener('click', () => { if (datum !== HEUTE) datumSetzen(HEUTE); setzeZeit(DEMO_JETZT); });
