@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Disposition – Klick-Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css">
+<style>
+  :root {
+    --gruen: #27a849;
+    --gruen-dunkel: #1d8a3a;
+    --gruen-hell: #e3f4e7;
+    --schiefer: #5b6770;
+    --schiefer-hell: #eef0f2;
+    --text: #1f2429;
+    --leise: #7a848c;
+    --linie: #e6e9ec;
+    --grund: #eceef1;
+    --flaeche: #fff;
+    --warn: #c47f17;
+    --warn-hell: #fdf3e1;
+    --rot: #d64545;
+    --rot-hell: #fdeaea;
+    --blau: #2f6fd6;
+    --blau-hell: #e6efff;
+    --orange: #f59e0b;
+    --schatten: 0 1px 2px rgba(20,30,40,.04), 0 8px 28px rgba(20,30,40,.07);
+    --radius: 16px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; font-family: 'Ubuntu', system-ui, sans-serif; color: var(--text); background: var(--grund); font-size: 14px; }
+  button, input, select, textarea { font: inherit; }
+  input, select, textarea { font-size: 16px; }
+  [hidden] { display: none !important; }
+  h1, h2, h3 { font-weight: 500; }
+
+  /* Grundraster: Icon-Leiste | Tourenliste | Hauptbereich */
+  .app { display: grid; grid-template-columns: 78px 320px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas: "nav kopf kopf" "nav liste haupt"; gap: 14px; height: 100vh; padding: 14px; }
+  .icons { grid-area: nav; } .kopf { grid-area: kopf; } .liste-panel { grid-area: liste; } .haupt { grid-area: haupt; }
+  /* Die Tourenliste gehört nur zur Ansicht „Touren“; alle anderen Ansichten bekommen die volle Breite */
+  .app:not([data-ansicht="dashboard"]) .liste-panel { display: none; }
+  .app:not([data-ansicht="dashboard"]) .haupt { grid-column: 2 / -1; }
+  .panel { background: var(--flaeche); border-radius: var(--radius); box-shadow: var(--schatten); }
+
+  .icons { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 0; }
+  .icons .zeichen { width: 40px; height: 40px; border-radius: 12px; background: var(--gruen); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 15px; margin-bottom: 14px; letter-spacing: -.5px; }
+  .icons button { width: 64px; min-height: 54px; border: none; border-radius: 12px; background: transparent; color: var(--schiefer); cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 6px 2px; font-size: 10.5px; font-weight: 500; line-height: 1.1; }
+  .icons button:hover { background: var(--schiefer-hell); }
+  .icons button[aria-selected="true"] { background: var(--text); color: #fff; }
+  .icons svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .icons .unten { margin-top: auto; }
+
+  /* Tourenliste */
+  .liste-panel { display: flex; flex-direction: column; min-height: 0; padding: 16px 14px 0; }
+  .liste-kopf { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .liste-kopf h2 { margin: 0; font-size: 17px; }
+  .zaehler { background: var(--text); color: #fff; border-radius: 6px; font-size: 11px; padding: 2px 6px; font-weight: 700; }
+  .suche { display: flex; gap: 8px; margin-bottom: 8px; }
+  .suche input { flex: 1; min-width: 0; padding: 9px 12px; border: 1px solid var(--linie); border-radius: 10px; background: var(--schiefer-hell); }
+  .touren { overflow-y: auto; flex: 1; padding: 0 0 14px; margin: 0 -4px; }
+  .farben { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; color: var(--leise); margin: 0 2px 8px; }
+  .farben i { display: inline-block; width: 4px; height: 12px; border-radius: 2px; margin-right: 5px; vertical-align: -2px; }
+  .tgruppe { margin-bottom: 6px; }
+  .tgruppe h3 { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--leise); text-transform: uppercase; letter-spacing: .06em; margin: 10px 6px 4px; }
+  .tgruppe .anzahl { background: var(--schiefer-hell); color: var(--schiefer); border-radius: 6px; padding: 0 6px; font-size: 11px; letter-spacing: 0; }
+  details.tgruppe > summary { list-style: none; cursor: pointer; }
+  details.tgruppe > summary::-webkit-details-marker { display: none; }
+  details.tgruppe > summary h3::after { content: '▸'; margin-left: auto; font-size: 12px; }
+  details.tgruppe[open] > summary h3::after { content: '▾'; }
+  .tz { width: 100%; display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; align-items: center; gap: 8px; text-align: left; border: none; border-left: 4px solid transparent; background: transparent; border-radius: 10px; padding: 7px 8px 7px 8px; cursor: pointer; color: inherit; }
+  .tz:hover { background: var(--schiefer-hell); }
+  .tz.auslieferung { border-left-color: var(--gruen); }
+  .tz.abholung { border-left-color: var(--blau); }
+  .tz.kombi, .tz.sped { border-left-color: var(--warn); }
+  .tz.aktiv { background: var(--gruen); color: #fff; }
+  .tz.aktiv small, .tz.aktiv .tz-info { color: rgba(255,255,255,.85); }
+  .tz-zeit { font-weight: 700; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .tz-text b { display: block; font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tz-text small { display: block; font-size: 11px; color: var(--leise); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tz-info { font-size: 11px; color: var(--leise); white-space: nowrap; }
+  .tz.aktiv .marke { background: rgba(255,255,255,.2); color: #fff; }
+  .hinweis.leer { margin: 0 10px 4px; font-size: 12px; }
+  .marke { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: 500; white-space: nowrap; }
+  .marke.frei { background: var(--gruen-hell); color: var(--gruen-dunkel); }
+  .marke.unterwegs, .marke.abholung { background: var(--blau-hell); color: var(--blau); }
+  .marke.weg { background: var(--rot-hell); color: var(--rot); }
+  .marke.warn { background: var(--warn-hell); color: var(--warn); }
+  .marke.grau { background: var(--schiefer-hell); color: var(--schiefer); }
+
+  /* Hauptbereich */
+  .haupt { display: flex; flex-direction: column; gap: 14px; min-width: 0; min-height: 0; }
+  .kopf { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 16px; }
+  .kopf .logo { height: 26px; }
+  .kopf .demo { font-size: 11px; font-weight: 500; color: var(--warn); background: var(--warn-hell); padding: 3px 8px; border-radius: 8px; }
+  .kpis { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .liste-panel .kpi { padding: 4px 9px; }
+  .liste-panel .kpi .wert { font-size: 14px; }
+  .kpi { background: var(--schiefer-hell); border-radius: 10px; padding: 5px 11px; display: flex; align-items: baseline; gap: 6px; }
+  .kpi .wert { font-size: 16px; font-weight: 700; }
+  .kpi .name { color: var(--leise); font-size: 12px; }
+  .kpi.warn { background: var(--warn-hell); }
+  .kpi.warn .wert { color: var(--warn); }
+  .zeitleiste { display: flex; align-items: center; gap: 10px; flex: 1 1 460px; min-width: 0; }
+  .zeitleiste select { padding: 6px 8px; border: 1px solid var(--linie); border-radius: 10px; background: #fff; font-size: 13px; }
+  .zeitspur { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; } /* min-width 0: Uhrzeiten wischen statt Seite verbreitern */
+  .zeitspur input[type=range] { width: 100%; margin: 0; accent-color: var(--gruen); }
+  .uhrzeiten { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; min-width: 0; max-width: 100%; }
+  .uhrzeiten button { flex: 1 0 auto; min-width: 40px; border: 1px solid var(--linie); background: #fff; border-radius: 8px; padding: 5px 4px; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--schiefer); cursor: pointer; }
+  .uhrzeiten button:hover { border-color: var(--gruen); color: var(--gruen-dunkel); }
+  .uhrzeiten button[aria-current="true"] { background: var(--gruen); border-color: var(--gruen); color: #fff; font-weight: 700; }
+  .zeitleiste output { font-size: 17px; font-weight: 700; min-width: 82px; font-variant-numeric: tabular-nums; }
+
+  .ansicht { flex: 1; min-height: 0; }
+  .dashboard { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; min-height: 0; }
+  .kartenpanel { position: relative; overflow: hidden; }
+  .panel-kopf { position: absolute; z-index: 3; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: flex-start; padding: 14px 16px; pointer-events: none; }
+  .panel-kopf > * { pointer-events: auto; }
+  .panel-kopf h1 { margin: 0; font-size: 18px; }
+  .panel-kopf small { color: var(--leise); }
+  .titelkasten { background: rgba(255,255,255,.88); backdrop-filter: blur(6px); border-radius: 12px; padding: 8px 12px; }
+  .werkzeuge { display: flex; gap: 6px; }
+  .werkzeuge button { height: 36px; padding: 0 12px; border: none; border-radius: 10px; background: #fff; box-shadow: var(--schatten); cursor: pointer; color: var(--schiefer); font-weight: 500; font-size: 13px; }
+  .werkzeuge button[aria-pressed="true"] { background: var(--gruen); color: #fff; }
+  #karte3d { position: absolute; inset: 0; }
+  .karten-fehler { padding: 40px; text-align: center; color: var(--leise); }
+
+  .detailspalte { overflow-y: auto; padding: 16px; min-height: 0; }
+  .detailspalte h2 { margin: 0 0 6px; font-size: 15px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .detailspalte .abschnitt { border-top: 1px solid var(--linie); margin-top: 16px; padding-top: 14px; }
+  .detailspalte .bild { background: linear-gradient(#f6f8f9, #eef1f3); border-radius: 12px; margin: 8px 0 10px; }
+  .detailspalte .bild svg { display: block; width: 100%; height: auto; }
+  .ablauf-liste { list-style: none; margin: 0; padding: 0; }
+  .ablauf-liste li { display: grid; grid-template-columns: 22px 42px minmax(0, 1fr); gap: 6px; align-items: start; padding: 6px 8px; border-radius: 8px; font-size: 13px; }
+  .ablauf-liste li svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; margin-top: 1px; color: var(--schiefer); }
+  .ablauf-liste li small { display: block; color: var(--leise); font-size: 11px; }
+  .ablauf-liste li .al-zeit { font-variant-numeric: tabular-nums; font-weight: 500; }
+  .ablauf-liste li.fertig { color: var(--leise); }
+  .ablauf-liste li.aktuell { background: var(--gruen-hell); }
+  .ablauf-liste li.aktuell svg { color: var(--gruen-dunkel); }
+  .zeilen { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; font-size: 12px; margin: 0; }
+  .zeilen dt { color: var(--leise); }
+  .zeilen dd { margin: 0; text-align: right; font-weight: 500; }
+  .kennbox { margin-top: 12px; background: var(--gruen); color: #fff; border-radius: 12px; padding: 10px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; text-align: center; }
+  .kennbox.warnung { background: var(--warn); }
+  .kennbox b { display: block; font-size: 15px; }
+  .kennbox span { font-size: 10px; opacity: .85; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--linie); vertical-align: top; }
+  th { color: var(--leise); font-weight: 500; white-space: nowrap; }
+  td.zahl, th.zahl { text-align: right; white-space: nowrap; }
+  tr.aktiv td { background: var(--gruen-hell); }
+  .preis { font-size: 22px; font-weight: 700; margin: 2px 0 8px; }
+
+  /* weitere Ansichten */
+  .seite { padding: 18px; overflow: auto; }
+  .seite > h1 { margin: 0 0 4px; font-size: 20px; }
+  .untertitel { margin: 0 0 16px; color: var(--leise); font-size: 14px; }
+  .leiste { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin-bottom: 14px; }
+  .knopf { border: none; background: var(--gruen); color: #fff; padding: 9px 16px; border-radius: 10px; cursor: pointer; font-weight: 500; }
+  .knopf:hover { background: var(--gruen-dunkel); }
+  .knopf.zweit { background: var(--schiefer-hell); color: var(--schiefer); }
+  .knopf.warn { background: var(--warn); }
+  .knopf.klein { padding: 6px 12px; font-size: 13px; }
+  .knopf:disabled { opacity: .45; cursor: not-allowed; }
+  .knopfreihe { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .legende { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--leise); font-size: 12px; }
+  .legende i { display: inline-block; width: 14px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  .hinweis { font-size: 13px; color: var(--leise); }
+  .hinweis.warn { color: #7a4f10; }
+  h2 { font-size: 16px; color: var(--text); margin: 20px 0 10px; }
+  h2:first-child { margin-top: 0; }
+  .tab-rahmen { overflow-x: auto; }
+  .seite table { font-size: 13px; }
+  .seite th { background: var(--schiefer-hell); }
+  .balken { width: 110px; height: 8px; background: var(--schiefer-hell); border-radius: 5px; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 6px; }
+  .balken.breit { width: 100%; margin: 4px 0 0; }
+  .balken i { display: block; height: 100%; background: var(--gruen); }
+  .karten { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
+  .karte { border: 1px solid var(--linie); border-radius: 14px; padding: 12px 14px; }
+  .karte h3 { margin: 0 0 4px; font-size: 14px; }
+  .karte p { margin: 4px 0; font-size: 13px; color: var(--leise); }
+  .befund { margin-top: 10px; padding: 8px 10px; border-radius: 10px; font-size: 13px; }
+  .befund.vermeidbar { background: var(--warn-hell); color: #7a4f10; border-left: 4px solid var(--warn); }
+  .befund.ok { background: var(--gruen-hell); color: var(--gruen-dunkel); border-left: 4px solid var(--gruen); }
+  .liste { margin: 0 0 8px; padding-left: 18px; font-size: 13px; line-height: 1.6; }
+  .kpi-reihe { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .kpi-reihe .kpi { flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 14px; border-radius: 14px; }
+  .kpi-reihe .kpi .wert { font-size: 22px; }
+
+  /* Plantafel */
+  .tafel-rahmen { overflow-x: auto; border: 1px solid var(--linie); border-radius: 12px; }
+  .tafel { min-width: 1000px; }
+  .zeile { display: grid; grid-template-columns: 200px 1fr; border-bottom: 1px solid var(--linie); }
+  .zeile:last-child { border-bottom: none; }
+  .zeile .label { position: sticky; left: 0; z-index: 2; background: var(--flaeche); padding: 8px 10px; border-right: 1px solid var(--linie); }
+  .zeile .label strong { display: block; font-size: 13px; }
+  .zeile .label small { display: block; color: var(--leise); font-size: 11px; line-height: 1.35; }
+  .spur { position: relative; min-height: 58px; background-image: linear-gradient(to right, var(--linie) 1px, transparent 1px); background-size: calc(100% / 13) 100%; }
+  .kopfzeile .label, .kopfzeile .spur { min-height: 0; background: var(--schiefer-hell); }
+  .kopfzeile .spur { display: grid; grid-template-columns: repeat(13, 1fr); font-size: 11px; color: var(--schiefer); }
+  .kopfzeile .spur span { padding: 6px 4px; border-left: 1px solid var(--linie); }
+  .jetzt { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--rot); z-index: 1; }
+  .block { position: absolute; top: 7px; bottom: 7px; border: none; border-radius: 8px; padding: 3px 7px; text-align: left; color: #fff; cursor: pointer; overflow: hidden; white-space: nowrap; font-size: 11px; line-height: 1.3; z-index: 1; }
+  .block b { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+  .block span { display: block; opacity: .9; overflow: hidden; text-overflow: ellipsis; }
+  .block[data-art="Auslieferung"] { background: var(--gruen); }
+  .block[data-art="Abholung"] { background: var(--blau); }
+  .block[data-kombi="ja"] { background: linear-gradient(90deg, var(--gruen) 45%, var(--blau) 55%); }
+  .block[data-status="erledigt"] { opacity: .45; }
+  .block[data-status="unterwegs"] { box-shadow: 0 0 0 2px var(--text); }
+  .block:focus-visible { outline: 3px solid var(--warn); outline-offset: 1px; }
+  .frei-hinweis { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: var(--gruen-dunkel); font-size: 12px; font-weight: 500; }
+
+  /* Karte-Marker */
+  .lkw-marke { min-width: 34px; height: 22px; padding: 0 5px; border-radius: 7px; background: var(--gruen); color: #fff; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,.3); cursor: pointer; }
+  .lkw-marke.abholung { background: var(--blau); }
+  .lkw-marke.leer { background: var(--schiefer); }
+  .lkw-marke.gewaehlt { transform: scale(1.25); background: var(--text); }
+  .ort-schild { background: #fff; border-radius: 8px; padding: 3px 8px; font-size: 11px; font-weight: 500; box-shadow: var(--schatten); white-space: nowrap; }
+  .ort-schild.ziel { background: var(--text); color: #fff; }
+  .ort-schild.halle { background: var(--orange); color: #fff; }
+
+  /* Hofansicht: 3D-Szene mit Panels darüber */
+  .hofansicht { position: relative; overflow: hidden; min-height: 600px; }
+  #hof3d { position: absolute; inset: 0; }
+  #hof3d canvas { display: block; cursor: grab; }
+  .hof-oben { position: absolute; z-index: 2; top: 14px; left: 14px; right: 334px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; pointer-events: none; }
+  .hof-oben > * { pointer-events: auto; }
+  .hof-oben h1 { margin: 0; font-size: 18px; }
+  .hof-kpis { display: flex; flex-wrap: wrap; gap: 8px; }
+  .hof-kpis .kpi { background: rgba(255,255,255,.94); box-shadow: var(--schatten); flex-direction: column; align-items: flex-start; gap: 0; padding: 8px 12px; border-radius: 12px; }
+  .hof-kpis .kpi.warn { background: var(--warn-hell); }
+  .hof-seite { position: absolute; z-index: 2; top: 14px; right: 14px; width: 306px; max-height: calc(100% - 28px); overflow: auto; padding: 14px; }
+  .hof-unten { position: absolute; z-index: 2; left: 14px; bottom: 14px; width: min(560px, calc(100% - 348px)); padding: 12px 14px; max-height: 210px; overflow: auto; }
+  .hof-unten h2, .hof-seite h2 { font-size: 14px; margin: 0 0 8px; }
+  .hof-seite h2 + .befund { margin-top: 0; }
+  .hof-seite .befund + h2 { margin-top: 14px; }
+
+  /* 3D-Ladeplan */
+  .lp-raster { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 16px; }
+  .lp-feld label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--leise); margin-bottom: 10px; }
+  .lp-feld select { padding: 8px; border: 1px solid var(--linie); border-radius: 10px; background: #fff; color: var(--text); }
+  .lp-feld ul { list-style: none; padding: 0; margin: 0 0 12px; }
+  .lp-feld li { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--linie); font-size: 13px; }
+  .lp-feld li .x { margin-left: auto; }
+  .farbpunkt { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: none; }
+  .lp-wert { font-size: 13px; margin-bottom: 10px; }
+  .lp-plan { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+  .lp-plan input { padding: 8px; border: 1px solid var(--linie); border-radius: 10px; }
+  .lp-plan select, .lp-plan input { width: 100%; min-width: 0; }
+  .lp-status { font-size: 13px; margin: 2px 0 10px; line-height: 1.6; }
+  #lp-szene { height: 520px; border-radius: 12px; overflow: hidden; touch-action: none; }
+  #lp-szene canvas { display: block; cursor: grab; }
+
+  .annahmen { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .annahmen label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--leise); }
+  .annahmen input { padding: 7px; border: 1px solid var(--linie); border-radius: 8px; }
+
+  /* Dialoge */
+  dialog { border: none; border-radius: 16px; padding: 0; width: min(780px, calc(100vw - 32px)); max-height: calc(100vh - 32px); box-shadow: 0 10px 40px rgba(0,0,0,.25); }
+  dialog::backdrop { background: rgba(31,36,41,.45); }
+  .dlg-kopf { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--linie); }
+  .dlg-kopf h2 { margin: 0; }
+  .dlg-inhalt { padding: 16px 18px; overflow-y: auto; max-height: calc(100vh - 120px); }
+  .x { border: none; background: none; font-size: 22px; line-height: 1; cursor: pointer; color: var(--schiefer); padding: 4px 8px; }
+  .x.klein { font-size: 17px; }
+  dl.daten { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 13px; }
+  dl.daten dt { color: var(--leise); }
+  dl.daten dd { margin: 0; }
+  .formular { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .formular label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--leise); }
+  .formular select, .formular input { padding: 8px; border: 1px solid var(--linie); border-radius: 10px; color: var(--text); background: #fff; }
+  .geraet-info { background: var(--schiefer-hell); border-radius: 10px; padding: 8px 12px; font-size: 13px; margin-bottom: 12px; }
+  .kandidat { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 9px 10px; border-bottom: 1px solid var(--linie); }
+  .kandidat .kz { width: 190px; flex: none; }
+  .kandidat .kz strong { display: block; font-size: 13px; }
+  .kandidat .kz small { color: var(--leise); font-size: 11px; }
+  .kandidat .gruende { flex: 1 1 220px; font-size: 12px; }
+  .kandidat .gruende div { margin: 1px 0; }
+  .kandidat .aktion { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .kandidat .aktion select { padding: 6px; border: 1px solid var(--linie); border-radius: 8px; }
+  .kandidat.passt { background: #f6fbf7; }
+  .g-nein { color: var(--rot); }
+  .g-genehmigung { color: var(--warn); }
+  .g-ok { color: var(--gruen-dunkel); }
+  .sped-box { margin-top: 16px; padding: 12px; border: 1px dashed var(--warn); border-radius: 12px; }
+  .sped-box textarea { width: 100%; min-height: 60px; padding: 8px; border: 1px solid var(--linie); border-radius: 8px; margin: 8px 0; }
+  .fuss { font-size: 11px; color: var(--leise); padding: 0 4px; }
+
+  @media (max-width: 1200px) {
+    .app { grid-template-columns: 78px 280px minmax(0, 1fr); }
+    .dashboard { display: flex; flex-direction: column; overflow-y: auto; }  /* Details unter der Karte statt daneben */
+    .kartenpanel { flex: none; height: 460px; }
+    .detailspalte { overflow: visible; flex: none; }
+    .detailspalte .bild svg { max-height: 170px; }
+    .kopf .logo { height: 22px; }
+    .hofansicht { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+    #hof3d { position: relative; inset: auto; flex: none; height: 460px; order: 2; border-radius: 12px; overflow: hidden; }
+    .hof-oben { position: static; order: 1; }
+    .hof-seite, .hof-unten { position: static; width: auto; max-height: none; box-shadow: none; border: 1px solid var(--linie); }
+    .hof-seite { order: 3; } .hof-unten { order: 4; }
+  }
+  @media (max-width: 900px) and (min-width: 701px) {
+    .app { grid-template-columns: 78px 250px minmax(0, 1fr); padding: 10px; gap: 10px; }
+    .kartenpanel { height: 420px; }
+  }
+  @media (max-width: 700px) {
+    .app { display: flex; flex-direction: column; height: auto; padding: 10px; gap: 10px; }
+    .icons { flex-direction: row; overflow-x: auto; padding: 6px; }
+    .icons .zeichen { margin: 0 8px 0 0; flex: none; }
+    .icons button { flex: none; }
+    .icons .unten { margin: 0 0 0 auto; }
+    .liste-panel { padding-bottom: 12px; }
+    .detailspalte .bild svg { max-height: 150px; }
+    .detailspalte { overflow: visible; }
+    .liste-panel { max-height: 380px; }
+    .werkzeuge button { white-space: nowrap; padding: 0 9px; }
+    .panel-kopf { flex-wrap: wrap; gap: 8px; }
+    .kpis { margin-left: 0; }
+    .zeitleiste { flex-wrap: wrap; }
+    .zeitspur { order: 3; flex-basis: 100%; }
+    .dashboard { display: flex; flex-direction: column; }
+    .kartenpanel { height: 440px; }
+    .lp-raster { grid-template-columns: 1fr; }
+    #hof3d { height: 420px; }
+    #lp-szene { height: 340px; }
+    .zeile { grid-template-columns: 150px 1fr; }
+    .kandidat .kz { width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="app" data-ansicht="dashboard">
+
+  <nav class="icons panel" aria-label="Bereiche">
+    <div class="zeichen" aria-hidden="true">HR</div>
+    <button data-ansicht="dashboard" aria-selected="true" title="Touren: Liste, Karte und Details" aria-label="Touren" data-label="Touren" data-icon="karte"></button>
+    <button data-ansicht="plantafel" aria-selected="false" title="Tagesplan aller Lkw" aria-label="Tagesplan" data-label="Tagesplan" data-icon="tafel"></button>
+    <button data-ansicht="hof" aria-selected="false" title="Hof live: Rampen, Stellplätze, Stapler" aria-label="Hof" data-label="Hof" data-icon="hof"></button>
+    <button data-ansicht="ladeplan" aria-selected="false" title="3D-Ladeplan: passt das Gerät auf den Lkw?" aria-label="Ladeplan" data-label="Ladeplan" data-icon="wuerfel"></button>
+    <button data-ansicht="spedition" aria-selected="false" title="Aufträge an Speditionen" aria-label="Spedition" data-label="Spedition" data-icon="spedition"></button>
+    <button data-ansicht="kosten" aria-selected="false" title="Kosten, Leerfahrten, Kombi-Touren" aria-label="Kosten" data-label="Kosten" data-icon="euro"></button>
+    <button data-ansicht="fuhrpark" aria-selected="false" title="Lkw, Fahrer und Geräte" aria-label="Fahrzeuge" data-label="Fahrzeuge" data-icon="lkw"></button>
+    <button class="unten" id="reset-knopf" title="Demo zurücksetzen" aria-label="Demo zurücksetzen" data-label="Demo neu" data-icon="reset"></button>
+  </nav>
+
+  <header class="kopf panel">
+    <img class="logo" src="logo.svg" alt="Helmut Reiter">
+    <div class="zeitleiste" aria-label="Uhrzeit">
+      <button class="knopf klein" id="zeit-play" title="Tag abspielen">▶ Abspielen</button>
+      <select id="zeit-tempo" aria-label="Abspieltempo">
+        <option value="1" selected>1 Min./s</option>
+        <option value="2">2 Min./s</option>
+        <option value="5">5 Min./s</option>
+        <option value="15">15 Min./s</option>
+      </select>
+      <div class="zeitspur">
+        <div class="uhrzeiten" id="uhrzeiten" role="group" aria-label="Zur Uhrzeit springen"></div>
+        <input type="range" id="zeit-regler" min="360" max="1140" step="5" aria-label="Uhrzeit">
+      </div>
+      <output id="zeit-anzeige"></output>
+      <button class="knopf zweit klein" id="zeit-jetzt">Jetzt</button>
+    </div>
+    <button class="knopf" id="neu-knopf">+ Neuer Transport</button>
+  </header>
+
+  <aside class="liste-panel panel" aria-label="Touren">
+    <div class="liste-kopf">
+      <h2>Touren heute</h2><span class="zaehler" id="touren-zahl"></span>
+    </div>
+    <div class="kpis" id="kpis" aria-label="Kennzahlen"></div>
+    <div class="suche"><input id="suche" type="search" placeholder="Suchen: Ort, Gerät, Lkw, Fahrer" aria-label="Touren durchsuchen"></div>
+    <div class="farben" aria-hidden="true">
+      <span><i style="background:var(--gruen)"></i>Auslieferung</span>
+      <span><i style="background:var(--blau)"></i>Abholung</span>
+      <span><i style="background:var(--warn)"></i>Kombi / Spedition</span>
+    </div>
+    <div class="touren" id="tour-liste"></div>
+  </aside>
+
+  <div class="haupt">
+
+    <section id="v-dashboard" class="ansicht dashboard">
+      <div class="kartenpanel panel" id="kartenpanel">
+        <div id="karte3d"></div>
+        <div class="panel-kopf">
+          <div class="titelkasten"><h1>Touren</h1><small id="karte-unterzeile"></small></div>
+          <div class="werkzeuge">
+            <button id="k-alle" aria-pressed="false">Alle Touren</button>
+            <button id="k-hof">Hof in 3D</button>
+            <button id="k-3d" aria-pressed="true">3D</button>
+          </div>
+        </div>
+      </div>
+      <aside class="detailspalte panel" aria-label="Gewählte Tour">
+        <div id="tour-detail"></div>
+        <div class="abschnitt" id="tour-ablauf"></div>
+        <div class="abschnitt" id="tour-kosten"></div>
+      </aside>
+    </section>
+
+    <section id="v-plantafel" class="ansicht seite panel" hidden>
+      <h1>Tagesplan</h1>
+      <p class="untertitel">Alle Lkw des Tages auf einer Zeitachse. Ein Klick auf einen Balken öffnet die Tour.</p>
+      <div class="leiste">
+        <div class="legende">
+          <span><i style="background:var(--gruen)"></i>Auslieferung</span>
+          <span><i style="background:var(--blau)"></i>Abholung</span>
+          <span><i style="background:linear-gradient(90deg,var(--gruen) 45%,var(--blau) 55%)"></i>Kombi-Tour</span>
+          <span><i style="background:var(--gruen);box-shadow:0 0 0 2px var(--text)"></i>unterwegs</span>
+          <span><i style="background:var(--gruen);opacity:.45"></i>erledigt</span>
+          <span><i style="background:var(--rot);width:3px"></i>Uhrzeit</span>
+        </div>
+      </div>
+      <div class="tafel-rahmen"><div class="tafel" id="tafel"></div></div>
+    </section>
+
+    <section id="v-hof" class="ansicht hofansicht panel" hidden>
+      <div id="hof3d"></div>
+      <div class="hof-oben">
+        <div class="titelkasten"><h1>Hof</h1><small>Wer steht wo, wer lädt an welcher Rampe · Beispiel-Layout Essen-Kray</small></div>
+        <div class="hof-kpis" id="hof-kpis"></div>
+      </div>
+      <aside class="hof-seite panel" id="hof-info"></aside>
+      <div class="hof-unten panel" id="hof-docks"></div>
+    </section>
+
+    <section id="v-ladeplan" class="ansicht seite panel" hidden>
+      <h1>Ladeplan</h1>
+      <p class="untertitel">Passt das Gerät auf den Lkw? Gerät aufladen, prüfen und die Tour direkt einplanen.</p>
+      <div class="lp-raster">
+        <div class="lp-feld">
+          <label>Lkw<select id="lp-lkw"></select></label>
+          <label>Gerät<select id="lp-geraet"></select></label>
+          <button class="knopf klein" id="lp-dazu">+ Aufladen</button>
+          <h2>Ladung</h2>
+          <ul id="lp-liste"></ul>
+          <div id="lp-werte"></div>
+          <h2>Tour planen</h2>
+          <div class="lp-plan">
+            <label>Art<select id="lp-art"><option>Auslieferung</option><option>Abholung</option></select></label>
+            <label>Kunde / Ort<select id="lp-ort"></select></label>
+            <label>Abfahrt am Hof<input id="lp-start" type="time" min="06:00" max="17:00" step="900"></label>
+            <label>Fahrer<select id="lp-fahrer"></select></label>
+          </div>
+          <div id="lp-status" class="lp-status"></div>
+          <button class="knopf" id="lp-einplanen">Tour einplanen</button>
+          <p class="hinweis">Ziehen zum Drehen, Mausrad zum Zoomen. Geräte als vereinfachte Körper in echten Transportmaßen.</p>
+        </div>
+        <div id="lp-szene"></div>
+      </div>
+    </section>
+
+    <section id="v-kosten" class="ansicht seite panel" hidden>
+      <h1>Kosten</h1>
+      <p class="untertitel">Was die Touren heute kosten und wo sich Leerfahrten und Speditionen sparen lassen.</p>
+      <div class="kpi-reihe" id="kosten-kpis"></div>
+      <h2>Kombi-Touren statt Leerfahrten</h2>
+      <p class="hinweis">Nach dem Abladen fährt der Lkw direkt zur nächsten Abholung, statt leer zum Hof zurückzukommen.</p>
+      <div class="karten" id="kombi-liste"></div>
+      <h2>Spedition gegen eigenen Lkw</h2>
+      <div class="tab-rahmen"><table id="sped-kosten"></table></div>
+      <h2>Annahmen</h2>
+      <p class="hinweis">Beispielwerte, bitte mit Reiter abstimmen. Fahrzeugkosten je km stehen beim jeweiligen Lkw.</p>
+      <div class="annahmen" id="annahmen"></div>
+    </section>
+
+    <section id="v-fuhrpark" class="ansicht seite panel" hidden>
+      <h1>Fahrzeuge &amp; Geräte</h1>
+      <p class="untertitel">Stammdaten: Lkw, Fahrer und die Transportmaße der Geräte.</p>
+      <h2>Lkw</h2>
+      <div class="tab-rahmen"><table id="tab-lkw"></table></div>
+      <h2>Fahrer</h2>
+      <div class="tab-rahmen"><table id="tab-fahrer"></table></div>
+      <h2>Geräte und Transportmaße</h2>
+      <p class="hinweis">Ohne diese Stammdaten kann kein System sagen, ob ein Gerät auf einen Lkw passt. Maße gelten im Transportzustand (Mast/Ausleger eingefahren).</p>
+      <div class="tab-rahmen"><table id="tab-geraete"></table></div>
+    </section>
+
+    <section id="v-spedition" class="ansicht seite panel" hidden>
+      <h1>Spedition</h1>
+      <p class="hinweis">Jeder Speditionsauftrag wird gegen den eigenen Fuhrpark geprüft: Gab es zur selben Zeit einen freien, passenden Lkw mit freiem Fahrer?</p>
+      <div class="karten" id="sped-liste"></div>
+    </section>
+
+    <p class="fuss">Alle Fahrzeuge, Fahrer, Geräte, Maße, Preise und Touren sind erfundene Beispieldaten. Fahrzeit vereinfacht: 50 km/h plus je 30 Min. Laden und Abladen. Karte: OpenFreeMap / OpenStreetMap, Routen: OSRM.</p>
+  </div>
+</div>
+
+<dialog id="dlg-tour" aria-labelledby="dlg-tour-titel">
+  <div class="dlg-kopf"><h2 id="dlg-tour-titel">Tour</h2><button class="x" data-schliessen aria-label="Schließen">×</button></div>
+  <div class="dlg-inhalt" id="dlg-tour-inhalt"></div>
+</dialog>
+
+<dialog id="dlg-neu" aria-labelledby="dlg-neu-titel">
+  <div class="dlg-kopf"><h2 id="dlg-neu-titel">Neuer Transport</h2><button class="x" data-schliessen aria-label="Schließen">×</button></div>
+  <div class="dlg-inhalt">
+    <div class="formular">
+      <label>Art<select id="f-art"><option>Auslieferung</option><option>Abholung</option></select></label>
+      <label>Gerät<select id="f-geraet"></select></label>
+      <label>Kunde / Ort<select id="f-ort"></select></label>
+      <label>Abfahrt am Hof<input id="f-start" type="time" min="06:00" max="17:00" step="900" value="13:00"></label>
+    </div>
+    <div class="geraet-info" id="f-info"></div>
+    <div id="f-kandidaten"></div>
+    <div class="sped-box">
+      <strong>An Spedition geben</strong>
+      <div class="hinweis" id="f-sped-hinweis"></div>
+      <textarea id="f-grund" placeholder="Grund (Pflicht), z. B. Überbreite, Schwertransport mit Genehmigung"></textarea>
+      <button class="knopf warn klein" id="f-sped-knopf">An Spedition geben</button>
+    </div>
+  </div>
+</dialog>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+<script src="js/daten.js"></script>
+<script src="js/logik.js"></script>
+<script src="js/modelle3d.js"></script>
+<script src="js/hof.js"></script>
+<script src="js/karte3d.js"></script>
+<script src="js/ladeplan3d.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
