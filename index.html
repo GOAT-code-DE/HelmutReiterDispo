@@ -45,6 +45,45 @@
   /* Die Tourenliste gehört nur zur Ansicht „Touren“; alle anderen Ansichten bekommen die volle Breite */
   .app:not([data-ansicht="dashboard"]) .liste-panel { display: none; }
   .app:not([data-ansicht="dashboard"]) .haupt { grid-column: 2 / -1; }
+  /* Bedienelemente der Kopfzeile nur dort, wo sie etwas bewirken */
+  .app:not([data-ansicht="dashboard"]):not([data-ansicht="plantafel"]):not([data-ansicht="hof"]) .zeitleiste { display: none; }
+  .app:not([data-ansicht="dashboard"]):not([data-ansicht="plantafel"]) #neu-knopf { display: none; }
+  .app[data-ansicht="plantafel"]:not([data-plan="tag"]) .zeitleiste { display: none; }   /* Woche/Monat: Uhrzeit ohne Bedeutung */
+  .app[data-heute="nein"] .zeitleiste { display: none; }   /* Uhrzeit und Abspielen gibt es nur für heute */
+  .app[data-ansicht="ladeplan"] .datumswahl, .app[data-ansicht="fuhrpark"] .datumswahl { display: none; }
+  .datumswahl { display: flex; align-items: center; gap: 6px; }
+  .datumswahl input { padding: 6px 8px; border: 1px solid var(--linie); border-radius: 10px; background: #fff; font-size: 14px; min-width: 0; }
+  .knopf.symbol { padding: 6px; min-width: 34px; min-height: 34px; display: inline-grid; place-items: center; }
+  .knopf.symbol svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  .plan-reiter { display: inline-flex; gap: 4px; background: var(--schiefer-hell); padding: 4px; border-radius: 12px; margin-bottom: 14px; }
+  .plan-reiter button { border: none; background: transparent; padding: 8px 18px; border-radius: 9px; cursor: pointer; font-weight: 500; color: var(--schiefer); min-height: 36px; }
+  .plan-reiter button[aria-selected="true"] { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+  .plan-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .plan-nav strong { font-size: 15px; }
+  .woche { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; min-width: 760px; }
+  .woche th, .woche td { border-bottom: 1px solid var(--linie); border-right: 1px solid var(--linie); padding: 6px; vertical-align: top; }
+  .woche th { background: var(--schiefer-hell); text-align: left; }
+  .woche th button { all: unset; cursor: pointer; display: block; width: 100%; }
+  .woche th small, .woche td.lkw small { display: block; color: var(--leise); font-weight: 400; font-size: 11px; }
+  .woche td.lkw { white-space: nowrap; background: #fff; position: sticky; left: 0; z-index: 1; font-weight: 500; }
+  .woche .heute { background: var(--gruen-hell); }
+  .woche .gewaehlt { outline: 2px solid var(--gruen); outline-offset: -2px; }
+  .wchip { display: block; width: 100%; text-align: left; border: none; border-left: 3px solid var(--gruen); background: var(--schiefer-hell); border-radius: 6px; padding: 4px 6px; margin-bottom: 4px; cursor: pointer; font-size: 12px; color: var(--text); min-height: 30px; }
+  .wchip.abholung { border-left-color: var(--blau); }
+  .wchip.kombi { border-left-color: var(--warn); }
+  .wchip b { font-variant-numeric: tabular-nums; margin-right: 4px; }
+  .woche .frei { color: var(--leise); font-size: 11px; }
+  .monat { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+  .monat .wtag { font-size: 12px; color: var(--leise); text-align: center; padding: 2px 0; }
+  .mtag { border: 1px solid var(--linie); background: #fff; border-radius: 12px; padding: 8px; min-height: 92px; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text); }
+  .mtag .zahl-tag { font-weight: 700; font-size: 14px; }
+  .mtag.anders { opacity: .45; }
+  .mtag.wochenende { background: var(--grund); }
+  .mtag.heute { border-color: var(--gruen); border-width: 2px; }
+  .mtag.gewaehlt { box-shadow: 0 0 0 3px var(--gruen-hell); }
+  .mtag .auslastung { height: 6px; background: var(--schiefer-hell); border-radius: 3px; overflow: hidden; }
+  .mtag .auslastung i { display: block; height: 100%; background: var(--gruen); }
+  .mtag small { color: var(--leise); font-size: 11px; }
   .panel { background: var(--flaeche); border-radius: var(--radius); box-shadow: var(--schatten); }
 
   .icons { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 0; }
@@ -70,8 +109,8 @@
   .tgruppe .anzahl { background: var(--schiefer-hell); color: var(--schiefer); border-radius: 6px; padding: 0 6px; font-size: 11px; letter-spacing: 0; }
   details.tgruppe > summary { list-style: none; cursor: pointer; }
   details.tgruppe > summary::-webkit-details-marker { display: none; }
-  details.tgruppe > summary h3::after { content: '▸'; margin-left: auto; font-size: 12px; }
-  details.tgruppe[open] > summary h3::after { content: '▾'; }
+  details.tgruppe > summary h3::after { content: ''; margin-left: auto; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); }
+  details.tgruppe[open] > summary h3::after { transform: rotate(45deg); }
   .tz { width: 100%; display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; align-items: center; gap: 8px; text-align: left; border: none; border-left: 4px solid transparent; background: transparent; border-radius: 10px; padding: 7px 8px 7px 8px; cursor: pointer; color: inherit; }
   .tz:hover { background: var(--schiefer-hell); }
   .tz.auslieferung { border-left-color: var(--gruen); }
@@ -122,6 +161,10 @@
   .panel-kopf > * { pointer-events: auto; }
   .panel-kopf h1 { margin: 0; font-size: 18px; }
   .panel-kopf small { color: var(--leise); }
+  .kartenlegende { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 11px; color: var(--leise); }
+  .kartenlegende i { display: inline-block; width: 22px; height: 0; margin-right: 6px; vertical-align: middle; border-top: 3px solid var(--gruen); }
+  .kartenlegende i.leer { border-top-style: dotted; }
+  .kartenlegende i.sped { border-top: 3px dashed var(--warn); }
   .titelkasten { background: rgba(255,255,255,.88); backdrop-filter: blur(6px); border-radius: 12px; padding: 8px 12px; }
   .werkzeuge { display: flex; gap: 6px; }
   .werkzeuge button { height: 36px; padding: 0 12px; border: none; border-radius: 10px; background: #fff; box-shadow: var(--schatten); cursor: pointer; color: var(--schiefer); font-weight: 500; font-size: 13px; }
@@ -226,21 +269,22 @@
   .ort-schild.ziel { background: var(--text); color: #fff; }
   .ort-schild.halle { background: var(--orange); color: #fff; }
 
-  /* Hofansicht: 3D-Szene mit Panels darüber */
-  .hofansicht { position: relative; overflow: hidden; min-height: 600px; }
+  /* Hofansicht: 3D-Szene, darunter aufklappbare Infokarten */
+  .hof-szene { position: relative; height: clamp(360px, 60vh, 680px); border-radius: 12px; overflow: hidden; touch-action: pan-y; }
   #hof3d { position: absolute; inset: 0; }
   #hof3d canvas { display: block; cursor: grab; }
-  .hof-oben { position: absolute; z-index: 2; top: 14px; left: 14px; right: 334px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; pointer-events: none; }
-  .hof-oben > * { pointer-events: auto; }
-  .hof-oben h1 { margin: 0; font-size: 18px; }
-  .hof-kpis { display: flex; flex-wrap: wrap; gap: 8px; }
+  .hof-kpis { position: absolute; z-index: 2; top: 12px; left: 12px; display: flex; flex-wrap: wrap; gap: 8px; pointer-events: none; }
   .hof-kpis .kpi { background: rgba(255,255,255,.94); box-shadow: var(--schatten); flex-direction: column; align-items: flex-start; gap: 0; padding: 8px 12px; border-radius: 12px; }
   .hof-kpis .kpi.warn { background: var(--warn-hell); }
-  .hof-seite { position: absolute; z-index: 2; top: 14px; right: 14px; width: 306px; max-height: calc(100% - 28px); overflow: auto; padding: 14px; }
-  .hof-unten { position: absolute; z-index: 2; left: 14px; bottom: 14px; width: min(560px, calc(100% - 348px)); padding: 12px 14px; max-height: 210px; overflow: auto; }
-  .hof-unten h2, .hof-seite h2 { font-size: 14px; margin: 0 0 8px; }
-  .hof-seite h2 + .befund { margin-top: 0; }
-  .hof-seite .befund + h2 { margin-top: 14px; }
+  .hof-infos { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; margin-top: 14px; align-items: start; }
+  .infokarte { border: 1px solid var(--linie); border-radius: 14px; padding: 0 16px; }
+  .infokarte > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; font-weight: 500; font-size: 15px; padding: 14px 0; }
+  .infokarte > summary::-webkit-details-marker { display: none; }
+  .infokarte > summary::after { content: ''; width: 7px; height: 7px; border-right: 2px solid var(--schiefer); border-bottom: 2px solid var(--schiefer); transform: rotate(45deg); margin-right: 4px; }
+  .infokarte[open] > summary::after { transform: rotate(-135deg); }
+  .infokarte[open] { padding-bottom: 14px; }
+  .infokarte h2 { font-size: 14px; margin: 10px 0 8px; }
+  .infokarte h2:first-child { margin-top: 0; }
 
   /* 3D-Ladeplan */
   .lp-raster { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 16px; }
@@ -251,13 +295,30 @@
   .lp-feld li .x { margin-left: auto; }
   .farbpunkt { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: none; }
   .lp-wert { font-size: 13px; margin-bottom: 10px; }
-  .lp-plan { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+  .lp-plan { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
   .lp-plan input { padding: 8px; border: 1px solid var(--linie); border-radius: 10px; }
   .lp-plan select, .lp-plan input { width: 100%; min-width: 0; }
   .lp-status { font-size: 13px; margin: 2px 0 10px; line-height: 1.6; }
   #lp-szene { height: 520px; border-radius: 12px; overflow: hidden; touch-action: none; }
   #lp-szene canvas { display: block; cursor: grab; }
 
+  .kosten-satz { font-size: 16px; line-height: 1.5; margin: 0 0 16px; max-width: 900px; }
+  .kosten-satz b { font-weight: 700; }
+  .kosten-raster { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; margin-bottom: 14px; }
+  .kostenkarte { border: 1px solid var(--linie); border-radius: 14px; padding: 16px; }
+  .kostenkarte.breit { margin-bottom: 14px; }
+  .kostenkarte h2 { margin: 0 0 12px; font-size: 16px; }
+  .kostenbalken { margin: 10px 0; }
+  .kostenbalken .zeile-oben { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; }
+  .kostenbalken .zeile-oben b { font-size: 18px; }
+  .kostenbalken .spur-k { height: 12px; background: var(--schiefer-hell); border-radius: 6px; overflow: hidden; margin-top: 5px; }
+  .kostenbalken .spur-k i { display: block; height: 100%; background: var(--gruen); border-radius: 6px; }
+  .kostenbalken.sped .spur-k i { background: var(--warn); }
+  .kostenbalken.leer .spur-k i { background: var(--schiefer); }
+  .kostenbalken small { color: var(--leise); font-size: 12px; }
+  .sparzeile { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--linie); }
+  .sparzeile p { margin: 2px 0 0; font-size: 13px; color: var(--leise); }
+  .sparzeile .betrag { font-weight: 700; color: var(--gruen-dunkel); white-space: nowrap; font-size: 15px; }
   .annahmen { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
   .annahmen label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--leise); }
   .annahmen input { padding: 7px; border: 1px solid var(--linie); border-radius: 8px; }
@@ -268,7 +329,13 @@
   .dlg-kopf { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--linie); }
   .dlg-kopf h2 { margin: 0; }
   .dlg-inhalt { padding: 16px 18px; overflow-y: auto; max-height: calc(100vh - 120px); }
-  .x { border: none; background: none; font-size: 22px; line-height: 1; cursor: pointer; color: var(--schiefer); padding: 4px 8px; }
+  .x { border: none; background: none; line-height: 1; cursor: pointer; color: var(--schiefer); padding: 6px; border-radius: 8px; display: inline-grid; place-items: center; }
+  .x:hover { background: var(--schiefer-hell); }
+  .x svg, #zeit-play svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .x.klein { min-width: 36px; min-height: 36px; }
+  .x.klein svg { width: 14px; height: 14px; }
+  #zeit-play { display: inline-flex; align-items: center; gap: 6px; }
+  #zeit-play svg { width: 14px; height: 14px; fill: currentColor; stroke: none; }
   .x.klein { font-size: 17px; }
   dl.daten { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 13px; }
   dl.daten dt { color: var(--leise); }
@@ -300,11 +367,6 @@
     .detailspalte { overflow: visible; flex: none; }
     .detailspalte .bild svg { max-height: 170px; }
     .kopf .logo { height: 22px; }
-    .hofansicht { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding: 12px; }
-    #hof3d { position: relative; inset: auto; flex: none; height: 460px; order: 2; border-radius: 12px; overflow: hidden; }
-    .hof-oben { position: static; order: 1; }
-    .hof-seite, .hof-unten { position: static; width: auto; max-height: none; box-shadow: none; border: 1px solid var(--linie); }
-    .hof-seite { order: 3; } .hof-unten { order: 4; }
   }
   @media (max-width: 900px) and (min-width: 701px) {
     .app { grid-template-columns: 78px 250px minmax(0, 1fr); padding: 10px; gap: 10px; }
@@ -328,7 +390,6 @@
     .dashboard { display: flex; flex-direction: column; }
     .kartenpanel { height: 440px; }
     .lp-raster { grid-template-columns: 1fr; }
-    #hof3d { height: 420px; }
     #lp-szene { height: 340px; }
     .zeile { grid-template-columns: 150px 1fr; }
     .kandidat .kz { width: 100%; }
@@ -341,7 +402,7 @@
   <nav class="icons panel" aria-label="Bereiche">
     <div class="zeichen" aria-hidden="true">HR</div>
     <button data-ansicht="dashboard" aria-selected="true" title="Touren: Liste, Karte und Details" aria-label="Touren" data-label="Touren" data-icon="karte"></button>
-    <button data-ansicht="plantafel" aria-selected="false" title="Tagesplan aller Lkw" aria-label="Tagesplan" data-label="Tagesplan" data-icon="tafel"></button>
+    <button data-ansicht="plantafel" aria-selected="false" title="Planung: Tag, Woche, Monat" aria-label="Planung" data-label="Planung" data-icon="tafel"></button>
     <button data-ansicht="hof" aria-selected="false" title="Hof live: Rampen, Stellplätze, Stapler" aria-label="Hof" data-label="Hof" data-icon="hof"></button>
     <button data-ansicht="ladeplan" aria-selected="false" title="3D-Ladeplan: passt das Gerät auf den Lkw?" aria-label="Ladeplan" data-label="Ladeplan" data-icon="wuerfel"></button>
     <button data-ansicht="spedition" aria-selected="false" title="Aufträge an Speditionen" aria-label="Spedition" data-label="Spedition" data-icon="spedition"></button>
@@ -352,8 +413,14 @@
 
   <header class="kopf panel">
     <img class="logo" src="logo.svg" alt="Helmut Reiter">
+    <div class="datumswahl" role="group" aria-label="Tag wählen">
+      <button class="knopf zweit klein symbol" id="tag-zurueck" aria-label="Vorheriger Tag" title="Vorheriger Tag" data-icon="links"></button>
+      <input type="date" id="datum-eingabe" aria-label="Datum wählen">
+      <button class="knopf zweit klein symbol" id="tag-vor" aria-label="Nächster Tag" title="Nächster Tag" data-icon="rechts"></button>
+      <button class="knopf zweit klein" id="tag-heute">Heute</button>
+    </div>
     <div class="zeitleiste" aria-label="Uhrzeit">
-      <button class="knopf klein" id="zeit-play" title="Tag abspielen">▶ Abspielen</button>
+      <button class="knopf klein" id="zeit-play" title="Tag abspielen" data-icon="abspielen"><span>Abspielen</span></button>
       <select id="zeit-tempo" aria-label="Abspieltempo">
         <option value="1" selected>1 Min./s</option>
         <option value="2">2 Min./s</option>
@@ -372,7 +439,7 @@
 
   <aside class="liste-panel panel" aria-label="Touren">
     <div class="liste-kopf">
-      <h2>Touren heute</h2><span class="zaehler" id="touren-zahl"></span>
+      <h2 id="touren-titel">Touren heute</h2><span class="zaehler" id="touren-zahl"></span>
     </div>
     <div class="kpis" id="kpis" aria-label="Kennzahlen"></div>
     <div class="suche"><input id="suche" type="search" placeholder="Suchen: Ort, Gerät, Lkw, Fahrer" aria-label="Touren durchsuchen"></div>
@@ -390,7 +457,8 @@
       <div class="kartenpanel panel" id="kartenpanel">
         <div id="karte3d"></div>
         <div class="panel-kopf">
-          <div class="titelkasten"><h1>Touren</h1><small id="karte-unterzeile"></small></div>
+          <div class="titelkasten"><h1>Touren</h1><small id="karte-unterzeile"></small>
+            <div class="kartenlegende"><span><i class="voll"></i>Fahrt mit Ladung</span><span><i class="leer"></i>Leerfahrt</span><span><i class="sped"></i>Spedition</span></div></div>
           <div class="werkzeuge">
             <button id="k-alle" aria-pressed="false">Alle Touren</button>
             <button id="k-hof">Hof in 3D</button>
@@ -406,8 +474,14 @@
     </section>
 
     <section id="v-plantafel" class="ansicht seite panel" hidden>
-      <h1>Tagesplan</h1>
-      <p class="untertitel">Alle Lkw des Tages auf einer Zeitachse. Ein Klick auf einen Balken öffnet die Tour.</p>
+      <h1>Planung</h1>
+      <p class="untertitel">Welcher Lkw fährt wann? Für einen Tag, eine Woche oder einen Monat. Ein Klick auf eine Tour öffnet sie.</p>
+      <div class="plan-reiter" role="tablist" aria-label="Zeitraum">
+        <button role="tab" data-plan="tag" aria-selected="true">Tag</button>
+        <button role="tab" data-plan="woche" aria-selected="false">Woche</button>
+        <button role="tab" data-plan="monat" aria-selected="false">Monat</button>
+      </div>
+      <div id="plan-tag">
       <div class="leiste">
         <div class="legende">
           <span><i style="background:var(--gruen)"></i>Auslieferung</span>
@@ -419,16 +493,19 @@
         </div>
       </div>
       <div class="tafel-rahmen"><div class="tafel" id="tafel"></div></div>
+      </div>
+      <div id="plan-woche" hidden></div>
+      <div id="plan-monat" hidden></div>
     </section>
 
-    <section id="v-hof" class="ansicht hofansicht panel" hidden>
-      <div id="hof3d"></div>
-      <div class="hof-oben">
-        <div class="titelkasten"><h1>Hof</h1><small>Wer steht wo, wer lädt an welcher Rampe · Beispiel-Layout Essen-Kray</small></div>
-        <div class="hof-kpis" id="hof-kpis"></div>
+    <section id="v-hof" class="ansicht seite panel" hidden>
+      <h1>Hof</h1>
+      <p class="untertitel">Wer steht wo, wer lädt an welcher Rampe. Beispiel-Layout Essen-Kray. Ziehen dreht, Mausrad zoomt, ein Klick auf einen Lkw öffnet seine Tour.</p>
+      <div class="hof-szene"><div id="hof3d"></div><div class="hof-kpis" id="hof-kpis"></div></div>
+      <div class="hof-infos">
+        <details class="infokarte" open><summary>Rampen</summary><div id="hof-docks"></div></details>
+        <details class="infokarte" open><summary>Lage und nächste Abfahrten</summary><div id="hof-info"></div></details>
       </div>
-      <aside class="hof-seite panel" id="hof-info"></aside>
-      <div class="hof-unten panel" id="hof-docks"></div>
     </section>
 
     <section id="v-ladeplan" class="ansicht seite panel" hidden>
@@ -446,6 +523,7 @@
           <div class="lp-plan">
             <label>Art<select id="lp-art"><option>Auslieferung</option><option>Abholung</option></select></label>
             <label>Kunde / Ort<select id="lp-ort"></select></label>
+            <label>Datum<input id="lp-tag" type="date"></label>
             <label>Abfahrt am Hof<input id="lp-start" type="time" min="06:00" max="17:00" step="900"></label>
             <label>Fahrer<select id="lp-fahrer"></select></label>
           </div>
@@ -459,16 +537,29 @@
 
     <section id="v-kosten" class="ansicht seite panel" hidden>
       <h1>Kosten</h1>
-      <p class="untertitel">Was die Touren heute kosten und wo sich Leerfahrten und Speditionen sparen lassen.</p>
-      <div class="kpi-reihe" id="kosten-kpis"></div>
-      <h2>Kombi-Touren statt Leerfahrten</h2>
-      <p class="hinweis">Nach dem Abladen fährt der Lkw direkt zur nächsten Abholung, statt leer zum Hof zurückzukommen.</p>
-      <div class="karten" id="kombi-liste"></div>
-      <h2>Spedition gegen eigenen Lkw</h2>
-      <div class="tab-rahmen"><table id="sped-kosten"></table></div>
-      <h2>Annahmen</h2>
-      <p class="hinweis">Beispielwerte, bitte mit Reiter abstimmen. Fahrzeugkosten je km stehen beim jeweiligen Lkw.</p>
-      <div class="annahmen" id="annahmen"></div>
+      <p class="untertitel">Was der gewählte Tag kostet und wo sich Geld sparen lässt. Alle Beträge sind Schätzungen aus den Rechenannahmen unten.</p>
+      <p class="kosten-satz" id="kosten-satz"></p>
+      <div class="kosten-raster">
+        <section class="kostenkarte">
+          <h2>Was kostet der Tag?</h2>
+          <div id="kosten-tag"></div>
+        </section>
+        <section class="kostenkarte">
+          <h2>Wie viel fahren wir leer?</h2>
+          <div id="kosten-leer"></div>
+        </section>
+      </div>
+      <section class="kostenkarte breit">
+        <h2>Wo können wir sparen?</h2>
+        <p class="hinweis">Jeder Vorschlag lässt sich mit einem Klick umsetzen.</p>
+        <div id="sped-vorschlaege"></div>
+        <div id="kombi-liste"></div>
+      </section>
+      <details class="infokarte">
+        <summary>Rechenannahmen ändern</summary>
+        <p class="hinweis">Beispielwerte, bitte mit Reiter abstimmen. Was ein Lkw je Kilometer kostet, steht bei den Fahrzeugen.</p>
+        <div class="annahmen" id="annahmen"></div>
+      </details>
     </section>
 
     <section id="v-fuhrpark" class="ansicht seite panel" hidden>
@@ -494,17 +585,18 @@
 </div>
 
 <dialog id="dlg-tour" aria-labelledby="dlg-tour-titel">
-  <div class="dlg-kopf"><h2 id="dlg-tour-titel">Tour</h2><button class="x" data-schliessen aria-label="Schließen">×</button></div>
+  <div class="dlg-kopf"><h2 id="dlg-tour-titel">Tour</h2><button class="x" data-schliessen aria-label="Schließen" data-icon="schliessen"></button></div>
   <div class="dlg-inhalt" id="dlg-tour-inhalt"></div>
 </dialog>
 
 <dialog id="dlg-neu" aria-labelledby="dlg-neu-titel">
-  <div class="dlg-kopf"><h2 id="dlg-neu-titel">Neuer Transport</h2><button class="x" data-schliessen aria-label="Schließen">×</button></div>
+  <div class="dlg-kopf"><h2 id="dlg-neu-titel">Neuer Transport</h2><button class="x" data-schliessen aria-label="Schließen" data-icon="schliessen"></button></div>
   <div class="dlg-inhalt">
     <div class="formular">
       <label>Art<select id="f-art"><option>Auslieferung</option><option>Abholung</option></select></label>
       <label>Gerät<select id="f-geraet"></select></label>
       <label>Kunde / Ort<select id="f-ort"></select></label>
+      <label>Datum<input id="f-tag" type="date"></label>
       <label>Abfahrt am Hof<input id="f-start" type="time" min="06:00" max="17:00" step="900" value="13:00"></label>
     </div>
     <div class="geraet-info" id="f-info"></div>

@@ -189,7 +189,7 @@ function karte3dZeit() {
     const e = mk.getElement().firstChild;
     e.className = klasse;
     e.title = p.typ === 'fahrt'
-      ? `${l.kz} → ${p.nach === 'hof' ? 'Hof' : finde(ORTE, p.nach).name}, an ${hhmm(p.bis)}`
+      ? `${l.kz} nach ${p.nach === 'hof' ? 'Hof' : finde(ORTE, p.nach).name}, Ankunft ${hhmm(p.bis)}`
       : `${l.kz}: ${p.text} bis ${hhmm(p.bis)}`;
     aktiv.add(t.id);
   }

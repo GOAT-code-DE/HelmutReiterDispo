@@ -8,7 +8,7 @@ const LP_MAX = 6;
 function ladeplanOeffnen(lkwId, geraetIds, auftrag) {
   lp.lkw = lkwId;
   lp.geraete = geraetIds.slice(0, LP_MAX);
-  if (auftrag) lp.auftrag = { art: auftrag.art, ort: auftrag.ort, start: auftrag.start };
+  if (auftrag) lp.auftrag = { art: auftrag.art, ort: auftrag.ort, start: auftrag.start, tag: auftrag.tag };
   document.querySelectorAll('dialog[open]').forEach((d) => d.close());
   waehleAnsicht('ladeplan');
 }
@@ -90,7 +90,7 @@ function renderLadeplan() {
   $('#lp-lkw').value = l.id;
   $('#lp-liste').replaceChildren(...(geraete.length ? geraete.map((g, i) => el('li', {},
     el('i', { class: 'farbpunkt', style: `background:${g.farbe}` }), `${g.kurz} · ${zahl(g.gewicht, 1)} t · ${zahl(g.l)} m`,
-    el('button', { class: 'x klein', 'aria-label': `${g.kurz} entfernen`, onclick: () => { lp.geraete.splice(i, 1); renderLadeplan(); } }, '×')))
+    el('button', { class: 'x klein', 'aria-label': `${g.kurz} entfernen`, title: 'Entfernen', onclick: () => { lp.geraete.splice(i, 1); renderLadeplan(); } }, icon('schliessen'))))
     : [el('li', { class: 'hinweis' }, 'Noch nichts geladen.')]));
   $('#lp-dazu').disabled = lp.geraete.length >= LP_MAX;
   const balken = (wert, max, text) => el('div', { class: 'lp-wert' },
@@ -98,8 +98,8 @@ function renderLadeplan() {
     el('span', { class: 'balken breit' }, el('i', { style: `width:${Math.min(100, wert / max * 100)}%;${wert > max ? 'background:var(--rot)' : ''}` })));
   const fazit = !geraete.length ? null
     : plan.probleme.length
-      ? el('div', {}, ...plan.probleme.map((p) => el('div', { class: 'g-' + p.art }, (p.art === 'nein' ? '✕ ' : '⚠ ') + p.txt)))
-      : el('div', { class: 'g-ok' }, '✓ Ladung passt ohne Genehmigung');
+      ? el('div', {}, ...plan.probleme.map((p) => el('div', { class: 'g-' + p.art }, (p.art === 'nein' ? 'Passt nicht: ' : 'Genehmigung nötig: ') + p.txt)))
+      : el('div', { class: 'g-ok' }, 'Ladung passt ohne Genehmigung');
   $('#lp-werte').replaceChildren(
     balken(plan.gewicht, l.nutzlast, `Gewicht ${zahl(plan.gewicht, 1)} von ${zahl(l.nutzlast, 1)} t`),
     balken(plan.laenge, l.laenge, `Ladelänge ${zahl(plan.laenge, 1)} von ${zahl(l.laenge, 1)} m`),
@@ -146,13 +146,16 @@ function renderLadeplan() {
 
 // ---------- Tour direkt aus dem Ladeplan einplanen ----------
 function lpAuftrag() {
-  return { art: lp.auftrag.art, geraet: lp.geraete[0], ort: lp.auftrag.ort, start: lp.auftrag.start };
+  if (!lp.auftrag.tag || lp.auftrag.tag < HEUTE) lp.auftrag.tag = datum >= HEUTE ? datum : HEUTE;
+  return { art: lp.auftrag.art, geraet: lp.geraete[0], ort: lp.auftrag.ort, start: lp.auftrag.start, tag: lp.auftrag.tag };
 }
 function renderLpPlanung() {
   $('#lp-art').value = lp.auftrag.art;
   $('#lp-ort').value = lp.auftrag.ort;
   $('#lp-start').value = hhmm(lp.auftrag.start);
   const l = finde(LKW, lp.lkw), a = lpAuftrag();
+  $('#lp-tag').min = HEUTE;
+  $('#lp-tag').value = a.tag;
   const pruefungen = [];
   let fahrer = [];
   if (lp.geraete.length !== 1) {
@@ -162,14 +165,14 @@ function renderLpPlanung() {
     const pr = ladepruefung(finde(GERAETE, a.geraet), l);
     pruefungen.push(pr.ergebnis === 'ok' ? ['ok', 'Ladung passt ohne Genehmigung'] : ['nein', 'Ladung passt nicht ohne Genehmigung']);
     pruefungen.push(bis <= TAG_ENDE ? ['ok', `Rückkehr ${hhmm(bis)} Uhr`] : ['nein', `Rückkehr erst ${hhmm(bis)} – früher abfahren`]);
-    pruefungen.push(lkwFrei(l.id, a.start, bis) ? ['ok', `${l.kz} ist ${hhmm(a.start)}–${hhmm(bis)} frei`] : ['nein', `${l.kz} ist zu der Zeit schon verplant`]);
-    fahrer = FAHRER.filter((f) => darfFahren(f, l) && fahrerFrei(f.id, a.start, bis)).sort((x, y) => FS_RANG[x.fs] - FS_RANG[y.fs]);
+    pruefungen.push(lkwFrei(l.id, a.start, bis, [], a.tag) ? ['ok', `${l.kz} ist ${tagKurz(a.tag)} ${hhmm(a.start)}–${hhmm(bis)} frei`] : ['nein', `${l.kz} ist zu der Zeit schon verplant`]);
+    fahrer = FAHRER.filter((f) => darfFahren(f, l) && fahrerFrei(f.id, a.start, bis, [], a.tag)).sort((x, y) => FS_RANG[x.fs] - FS_RANG[y.fs]);
     pruefungen.push(fahrer.length ? ['ok', `${fahrer.length} Fahrer mit Klasse ${l.fs} frei`] : ['nein', `kein freier Fahrer mit Klasse ${l.fs}`]);
   }
   const alteWahl = $('#lp-fahrer').value;
   $('#lp-fahrer').replaceChildren(...(fahrer.length ? fahrer.map((f) => el('option', { value: f.id }, `${f.name} (${f.fs})`)) : [el('option', { value: '' }, '–')]));
   if (fahrer.some((f) => f.id === alteWahl)) $('#lp-fahrer').value = alteWahl;
-  $('#lp-status').replaceChildren(...pruefungen.map(([art, txt]) => el('div', { class: 'g-' + art }, (art === 'ok' ? '✓ ' : '✕ ') + txt)));
+  $('#lp-status').replaceChildren(...pruefungen.map(([art, txt]) => el('div', { class: 'g-' + art }, txt)));
   $('#lp-einplanen').disabled = pruefungen.some(([art]) => art !== 'ok');
 }
 function lpPlanungAufbauen() {
@@ -177,6 +180,7 @@ function lpPlanungAufbauen() {
   $('#lp-art').addEventListener('change', (e) => { lp.auftrag.art = e.target.value; renderLpPlanung(); });
   $('#lp-ort').addEventListener('change', (e) => { lp.auftrag.ort = e.target.value; renderLpPlanung(); });
   $('#lp-start').addEventListener('change', () => { lp.auftrag.start = feldMinuten('#lp-start'); renderLpPlanung(); });
+  $('#lp-tag').addEventListener('change', (e) => { if (istTag(e.target.value) && e.target.value >= HEUTE) lp.auftrag.tag = e.target.value; renderLpPlanung(); });
   $('#lp-einplanen').addEventListener('click', () => {
     if (!tourAnlegen(lpAuftrag(), lp.lkw, $('#lp-fahrer').value)) renderLpPlanung();
   });

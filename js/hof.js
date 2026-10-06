@@ -16,17 +16,33 @@ let hofSzene = null;
 // ---------- Logik: Rampenplan und Zustände (unabhängig von der Darstellung) ----------
 // Wer zuerst kommt, bekommt die zuerst freie Rampe und behält sie.
 // Ist keine frei, wartet der Lkw; die Wartezeit fehlt ihm beim Laden und verspätet die Abfahrt.
+// Stapler werden im selben Durchgang verplant: Die Rampe bleibt belegt, bis der Stapler fertig ist.
 function rampenPlan() {
   const ladungen = [];
-  for (const t of stand.touren) for (const p of phasen(t)) if (p.typ === 'laden' && p.wo === 'hof') ladungen.push({ t, p });
+  for (const t of stand.touren) {
+    const ph = phasen(t);
+    ph.forEach((p, i) => {
+      if (p.typ === 'laden' && p.wo === 'hof') ladungen.push({ t, p, art: i === 0 ? 'laden' : i === ph.length - 1 ? 'abladen' : null });
+    });
+  }
   ladungen.sort((a, b) => a.p.von - b.p.von || a.t.lkw.localeCompare(b.t.lkw));
-  const frei = RAMPEN.map(() => TAG_START);
+  const frei = RAMPEN.map(() => TAG_START), staplerFrei = STAPLER_HEIM.map(() => -Infinity);
   const plan = new Map();
   for (const x of ladungen) {
     const r = frei.indexOf(Math.min(...frei));
-    const beginn = Math.max(x.p.von, frei[r]);
-    frei[r] = beginn + LADEN_MIN;
-    plan.set(`${x.t.id}|${x.p.von}`, { rampe: r, beginn, warten: beginn - x.p.von });
+    const beginn = Math.max(x.p.von, frei[r]), warten = beginn - x.p.von;
+    const e = { rampe: r, beginn, warten, ende: beginn + LADEN_MIN };
+    if (x.art) {   // Stapler beginnt erst, wenn der Lkw angedockt und ein Stapler frei ist
+      const k = staplerFrei.indexOf(Math.min(...staplerFrei));
+      const ab = x.art === 'laden' || warten > 0 ? beginn + BEWEGUNG : x.p.von;
+      e.stapler = k;
+      e.von = Math.max(ab, staplerFrei[k]);
+      e.bis = Math.max(e.von + STAPLER_MIN, x.p.bis + warten);
+      staplerFrei[k] = e.bis;
+      e.ende = Math.max(e.ende, e.bis);
+    }
+    frei[r] = e.ende;
+    plan.set(`${x.t.id}|${x.p.von}`, e);
   }
   return plan;
 }
@@ -50,6 +66,17 @@ function lkwZustaende() {
     z[l.id] = zustand;
   }
   const plan = rampenPlan();
+  if (datum === HEUTE) {
+    for (const a of staplerAuftraege(plan)) {   // verspätet: Stapler noch nicht fertig, obwohl die Planzeit vorbei ist
+      if (zeit >= a.phase.bis && zeit < a.bis) {   // Rampe oder Warteschlange entscheidet unten der Rampenplan
+        const zst = { art: 'laedt', tour: a.t, phase: a.phase, verspaetet: true };
+        const alt = ladend.findIndex((x) => x.l.id === a.l.id);
+        if (alt >= 0) ladend.splice(alt, 1);
+        ladend.push({ l: a.l, zustand: zst });
+        z[a.l.id] = zst;
+      }
+    }
+  }
   const eintrag = (x) => plan.get(`${x.zustand.tour.id}|${x.zustand.phase.von}`);
   ladend.filter((x) => zeit < eintrag(x).beginn)
     .forEach((x, i) => { x.zustand.warteplatz = i; x.zustand.warten = eintrag(x).warten; });
@@ -240,6 +267,7 @@ function hofAufbauen() {
     const z = o && lkwZustaende()[o.userData.lkw];
     if (z?.tour) zeigeTour(z.tour.id);
   });
+  c.addEventListener('pointercancel', () => { zieht = null; }); // Browser übernimmt das Scrollen (touch-action: pan-y)
   c.addEventListener('wheel', (e) => { e.preventDefault(); blick.zoom = Math.max(0.6, Math.min(3.5, blick.zoom * (e.deltaY > 0 ? 0.9 : 1.1))); }, { passive: false });
 
   hofSzene = { renderer, szene, kamera, blick, lkw, stapler, geraeteGruppe, geraete: new Map(), laeuft: false };
@@ -291,7 +319,7 @@ function aufPfad(roh, f) { // Position und Ausrichtung bei Anteil f; rückwärts
 }
 
 // Fahrplan eines Lkw für den ganzen Tag: Abschnitte mit Pfad, fester Position oder „weg“
-function lkwFahrplan(l, lang, plan) {
+function lkwFahrplan(l, lang, plan, auftraege) {
   const i = LKW.indexOf(l);
   const platzX = PLAETZE[i].x, platzZ = PLATZ_HECK + lang / 2, dockZ = RAMPE_HECK + lang / 2;
   const e = [];
@@ -311,9 +339,10 @@ function lkwFahrplan(l, lang, plan) {
       } else {
         fahrt(p.von, [pkt(platzX, platzZ), ...ausparken(platzX, d), ...gasseNach(ausX, dockX + d * R_KURVE, d), ...andocken(dockX, d, dockZ)]);
       }
-      e.push({ von: r.beginn + BEWEGUNG, bis: p.bis, pose: { x: dockX, z: dockZ, rot: kurs(0, 1) } });
-      fahrt(p.bis, [pkt(dockX, dockZ), ...abfahrt(dockX, -1), ...gasseNach(dockX - R_KURVE, SPUR_NORD + R_KURVE, -1), ...wegAus()]);
-      wegAb = p.bis + BEWEGUNG;
+      const losAb = fertigUm(auftraege, t, 'laden', p.bis + r.warten);   // erst los, wenn der Stapler fertig ist
+      e.push({ von: r.beginn + BEWEGUNG, bis: losAb, pose: { x: dockX, z: dockZ, rot: kurs(0, 1) } });
+      fahrt(losAb, [pkt(dockX, dockZ), ...abfahrt(dockX, -1), ...gasseNach(dockX - R_KURVE, SPUR_NORD + R_KURVE, -1), ...wegAus()]);
+      wegAb = losAb + BEWEGUNG;
     } else {                                                        // Abholung: leer los
       fahrt(t.start, [pkt(platzX, platzZ), ...ausparken(platzX, -1), ...gasseNach(platzX + R_KURVE, SPUR_NORD + R_KURVE, -1), ...wegAus()]);
       wegAb = t.start + BEWEGUNG;
@@ -332,11 +361,12 @@ function lkwFahrplan(l, lang, plan) {
         fahrt(letzte.von - BEWEGUNG, [...wegEin(), ...gasseNach(einfahrtX, dockX + R_KURVE, 1), ...andocken(dockX, 1, dockZ)]);
       }
       const dockAb = r.warten > 0 ? r.beginn + BEWEGUNG : letzte.von;
-      e.push({ von: dockAb, bis: letzte.bis, pose: { x: dockX, z: dockZ, rot: kurs(0, 1) } });
+      const fertig = fertigUm(auftraege, t, 'abladen', letzte.bis + r.warten);
+      e.push({ von: dockAb, bis: fertig, pose: { x: dockX, z: dockZ, rot: kurs(0, 1) } });
       const d2 = platzX >= dockX ? 1 : -1;
-      fahrt(letzte.bis, [pkt(dockX, dockZ), ...abfahrt(dockX, d2), ...gasseNach(dockX + d2 * R_KURVE, platzX - d2 * R_KURVE, d2), ...einparken(platzX, d2, platzZ)]);
+      fahrt(fertig, [pkt(dockX, dockZ), ...abfahrt(dockX, d2), ...gasseNach(dockX + d2 * R_KURVE, platzX - d2 * R_KURVE, d2), ...einparken(platzX, d2, platzZ)]);
     } else {                                                        // leer zurück in die Bucht
-      const ankunft = ende(t) - BEWEGUNG;
+      const ankunft = Math.max(ende(t) - BEWEGUNG, wegAb);   // nie zurück, bevor die verspätete Beladung fertig ist
       e.push({ von: wegAb, bis: ankunft, weg: true });
       fahrt(ankunft, [...wegEin(), ...gasseNach(einfahrtX, platzX - R_KURVE, 1), ...einparken(platzX, 1, platzZ)]);
     }
@@ -353,34 +383,35 @@ function lkwPose(fp, hz) {
 }
 
 // ---------- Stapler-Aufträge: Gerät von der Bereitstellung auf den Lkw bzw. vom Lkw in die Rücknahme ----------
-function staplerAuftraege(plan, fahrplaene) {
+// Stapler, Beginn und Ende stammen aus dem Rampenplan. Das Ende (a.bis) ist der Moment, ab dem der Lkw fertig ist.
+const STAPLER_MIN = 8;   // Minuten, die ein Stapler mindestens für ein Gerät braucht
+function staplerAuftraege(plan) {
   const auftraege = [];
   for (const t of stand.touren) {
-    const ph = phasen(t), l = finde(LKW, t.lkw), fp = fahrplaene[l.id];
+    const ph = phasen(t), l = finde(LKW, t.lkw);
     if (ph[0].typ === 'laden' && ph[0].wo === 'hof') {
       const p = ph[0], r = plan.get(`${t.id}|${p.von}`);
-      auftraege.push({ art: 'laden', t, l, g: finde(GERAETE, p.ladung), dockX: RAMPEN[r.rampe].x, dockZ: fp.dockZ,
-        von: r.beginn + BEWEGUNG, bis: Math.max(r.beginn + BEWEGUNG + 4, p.bis), sichtbarAb: p.von - 120, sichtbarBis: p.bis + BEWEGUNG });
+      auftraege.push({ art: 'laden', t, l, g: finde(GERAETE, p.ladung), rampe: r.rampe, dockX: RAMPEN[r.rampe].x, phase: p,
+        stapler: r.stapler, von: r.von, bis: r.bis, sichtbarAb: p.von - 120 });
     }
     const letzte = ph[ph.length - 1];
     if (ph.length > 1 && letzte.typ === 'laden' && letzte.wo === 'hof') {
-      const r = plan.get(`${t.id}|${letzte.von}`), dockAb = r.warten > 0 ? r.beginn + BEWEGUNG : letzte.von;
-      auftraege.push({ art: 'abladen', t, l, g: finde(GERAETE, letzte.ladung), dockX: RAMPEN[r.rampe].x, dockZ: fp.dockZ,
-        von: dockAb, bis: Math.max(dockAb + 4, letzte.bis), sichtbarAb: letzte.von - BEWEGUNG, sichtbarBis: letzte.bis + 60 });
+      const r = plan.get(`${t.id}|${letzte.von}`);
+      auftraege.push({ art: 'abladen', t, l, g: finde(GERAETE, letzte.ladung), rampe: r.rampe, dockX: RAMPEN[r.rampe].x, phase: letzte,
+        stapler: r.stapler, von: r.von, bis: r.bis, sichtbarAb: letzte.von - BEWEGUNG });
     }
   }
   auftraege.sort((a, b) => a.von - b.von);
-  const frei = STAPLER_HEIM.map(() => -Infinity);
   let nBereit = 0, nRueck = 0;
   for (const a of auftraege) {
-    a.stapler = frei.indexOf(Math.min(...frei));
-    frei[a.stapler] = a.bis;
+    a.sichtbarBis = a.art === 'laden' ? a.bis + BEWEGUNG : a.bis + 60;
     a.platz = a.art === 'laden'
       ? { x: BEREIT.x0 + 4 + (nBereit++ % 3) * 8, z: (BEREIT.z0 + BEREIT.z1) / 2 }
       : { x: RUECKNAHME.x0 + 3.5 + (nRueck++ % 2) * 7, z: (RUECKNAHME.z0 + RUECKNAHME.z1) / 2 };
   }
   return auftraege;
 }
+const fertigUm = (auftraege, t, art, sonst) => auftraege.find((a) => a.t.id === t.id && a.art === art)?.bis ?? sonst;
 // Ablauf eines Auftrags in Anteilen: hinfahren 0–0,3, aufnehmen –0,4, transportieren –0,7, absetzen –0,8, zurück –1
 function staplerPose(a, f) {
   const heim = STAPLER_HEIM[a.stapler];
@@ -410,9 +441,11 @@ function hofPlaene() {
   const schluessel = JSON.stringify(stand.touren);
   if (schluessel !== hofCache.schluessel) {
     const plan = rampenPlan();
+    const auftraege = staplerAuftraege(plan);
     const fahrplaene = {};
-    for (const l of LKW) fahrplaene[l.id] = lkwFahrplan(l, hofSzene.lkw[l.id].lang, plan);
-    hofCache = { schluessel, fahrplaene, auftraege: staplerAuftraege(plan, fahrplaene) };
+    for (const l of LKW) fahrplaene[l.id] = lkwFahrplan(l, hofSzene.lkw[l.id].lang, plan, auftraege);
+    auftraege.forEach((a) => { a.dockZ = fahrplaene[a.l.id].dockZ; });
+    hofCache = { schluessel, fahrplaene, auftraege };
   }
   return hofCache;
 }
@@ -444,10 +477,11 @@ function hofSchleife() {
   const hs = hofSzene;
   if (ansicht !== 'hof') { hs.laeuft = false; return; }
   const hz = hofZeit();
-  const { fahrplaene, auftraege } = hofPlaene();
+  const { fahrplaene } = hofPlaene();
+  const auftraege = datum === HEUTE ? hofPlaene().auftraege : [];   // an anderen Tagen stehen alle Lkw, keine Stapler im Einsatz
 
   for (const l of LKW) {
-    const sp = hs.lkw[l.id], pose = lkwPose(fahrplaene[l.id], hz);
+    const sp = hs.lkw[l.id], pose = datum === HEUTE ? lkwPose(fahrplaene[l.id], hz) : { ...fahrplaene[l.id].geparkt, sichtbar: true };
     sp.gruppe.visible = pose.sichtbar;
     if (pose.sichtbar) { sp.gruppe.position.set(pose.x, 0, pose.z); sp.gruppe.rotation.y = pose.rot; }
   }
@@ -535,9 +569,9 @@ function hofPanels(zustaende) {
       : el('div', { class: 'befund ok' }, 'Kein Rampen-Engpass.'),
     el('h2', {}, 'Nächste Abfahrten'),
     naechste.length
-      ? el('ul', { class: 'liste' }, ...naechste.slice(0, 5).map((t) => el('li', {}, el('strong', {}, hhmm(t.start) + ' '), `${finde(LKW, t.lkw).kz} → ${zielText(t)} (${finde(GERAETE, t.geraet).kurz})`)))
+      ? el('ul', { class: 'liste' }, ...naechste.slice(0, 5).map((t) => el('li', {}, el('strong', {}, hhmm(t.start) + ' '), `${finde(LKW, t.lkw).kz} nach ${zielText(t)} (${finde(GERAETE, t.geraet).kurz})`)))
       : el('p', { class: 'hinweis' }, 'Heute keine weiteren Abfahrten.'),
-    el('p', { class: 'hinweis' }, 'Hof-Layout ist ein Beispiel und muss mit Reiter abgeglichen werden. Ziehen dreht, Mausrad zoomt, Klick auf einen Lkw öffnet seine Tour.'));
+    el('p', { class: 'hinweis' }, 'Hof-Layout ist ein Beispiel und muss mit Reiter abgeglichen werden.'));
 
   const zeilen = RAMPEN.map((r, i) => {
     const e = Object.entries(zustaende).find(([, z]) => z.rampe === i);
@@ -550,6 +584,6 @@ function hofPanels(zustaende) {
     zeilen.push(el('tr', {}, el('td', {}, 'Fahrgasse'), el('td', {}, finde(LKW, id).kz), el('td', {}, marke('wartet', 'warn')),
       el('td', {}, finde(GERAETE, z.phase.ladung).kurz), el('td', {}, `+${z.warten} Min.`)));
   }
-  $('#hof-docks').replaceChildren(el('h2', {}, 'Rampen'), el('table', {},
+  $('#hof-docks').replaceChildren(el('table', {},
     el('tr', {}, el('th', {}, 'Rampe'), el('th', {}, 'Lkw'), el('th', {}, 'Status'), el('th', {}, 'Ladung'), el('th', {}, 'Zeit')), ...zeilen));
 }

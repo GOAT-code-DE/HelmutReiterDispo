@@ -1,8 +1,9 @@
 'use strict';
 // Rechenlogik: Zeiten, Ladeprüfung, Verfügbarkeit, Kombi-Touren, Kosten. Kein DOM.
 
-const SPEICHER = 'reiter-dispo-demo-v2';
-let stand;            // { touren, sped, nr, kosten }
+const SPEICHER = 'reiter-dispo-demo-v3';
+let stand;            // { alleTouren, alleSped, nr, kosten } + Tagessicht touren/sped
+let datum = HEUTE;    // gewählter Tag
 let zeit = DEMO_JETZT; // aktuelle (abgespielte) Uhrzeit in Minuten
 
 const finde = (liste, id) => liste.find((x) => x.id === id);
@@ -13,8 +14,62 @@ const ueberlappt = (a1, a2, b1, b2) => a1 < b2 && b1 < a2;
 const fahrMinKm = (km) => Math.round(km / KMH * 60);
 
 // ---------- Speicher ----------
+// stand.touren und stand.sped zeigen nur den gewählten Tag; gespeichert wird alles in alleTouren/alleSped
+function tagesSicht(s) {
+  const sicht = (feld) => ({
+    configurable: true, enumerable: false,
+    get: () => s[feld].filter((x) => x.tag === datum),
+    set: (liste) => { liste.forEach((x) => { if (!x.tag) x.tag = datum; }); s[feld] = [...s[feld].filter((x) => x.tag !== datum), ...liste]; },
+  });
+  Object.defineProperty(s, 'touren', sicht('alleTouren'));
+  Object.defineProperty(s, 'sped', sicht('alleSped'));
+  return s;
+}
 function neuerStand() {
-  return { touren: structuredClone(SEED_TOUREN), sped: structuredClone(SEED_SPED), nr: 100, kosten: { ...KOSTEN_START } };
+  const b = beispielTage();
+  return tagesSicht({
+    alleTouren: [...structuredClone(SEED_TOUREN).map((t) => ({ ...t, tag: HEUTE })), ...b.touren],
+    alleSped: [...structuredClone(SEED_SPED).map((x) => ({ ...x, tag: HEUTE })), ...b.sped],
+    nr: b.nr, kosten: { ...KOSTEN_START },
+  });
+}
+// Beispieltouren von einer Woche zurück bis drei Wochen voraus, nah voller, fern lichter (fester Zufall)
+function beispielTage() {
+  let saat = 20261006;
+  const zufall = () => { saat = (saat * 1103515245 + 12345) % 2147483648; return saat / 2147483648; };
+  const wahl = (liste) => liste[Math.floor(zufall() * liste.length)];
+  const touren = [], sped = [];
+  let nr = 1000;
+  for (let tagNr = -7; tagNr <= 21; tagNr++) {
+    const tag = tagPlus(HEUTE, tagNr);
+    if (tagNr === 0 || wochentag(tag) === 0 || wochentag(tag) === 6) continue;
+    const dichte = tagNr < 0 ? 0.75 : tagNr <= 4 ? 0.7 : tagNr <= 11 ? 0.45 : 0.25;
+    const fahrerBelegt = {};
+    for (const l of LKW) {
+      if (zufall() > dichte) continue;
+      let start = 7 * 60 + Math.floor(zufall() * 12) * 15;
+      for (let k = 0; k < 2; k++) {
+        const g = wahl(GERAETE.filter((x) => ladepruefung(x, l).ergebnis === 'ok'));
+        if (!g) break;
+        const ort = wahl(ORTE), art = zufall() < 0.55 ? 'Auslieferung' : 'Abholung';
+        const bis = start + dauerEinfach(art, ort.id);
+        if (bis > 17 * 60) break;
+        const f = FAHRER.filter((x) => !x.abwesend && darfFahren(x, l) && !(fahrerBelegt[x.id] || []).some(([a, b]) => ueberlappt(start, bis, a, b)))
+          .sort((a, b) => FS_RANG[a.fs] - FS_RANG[b.fs])[0];
+        if (!f) break;
+        (fahrerBelegt[f.id] = fahrerBelegt[f.id] || []).push([start, bis]);
+        touren.push({ id: 'T' + nr++, tag, lkw: l.id, fahrer: f.id, geraet: g.id, ort: ort.id, art, start });
+        start = Math.ceil((bis + 30) / 15) * 15 + Math.floor(zufall() * 4) * 15; // nächste volle Viertelstunde
+        if (zufall() < 0.5) break;
+      }
+    }
+    if (zufall() < 0.5) {
+      sped.push({ id: 'S' + nr++, tag, geraet: wahl(GERAETE).id, ort: wahl(ORTE).id, art: zufall() < 0.5 ? 'Auslieferung' : 'Abholung',
+        start: 8 * 60 + Math.floor(zufall() * 16) * 15, spedition: wahl(['Spedition Nord', 'Schwerlast West']),
+        grund: wahl(['kein Lkw frei', 'kein Fahrer verfügbar', 'Überbreite, Schwertransport mit Genehmigung']) });
+    }
+  }
+  return { touren, sped, nr };
 }
 function laden() {
   try {
@@ -24,14 +79,14 @@ function laden() {
       && (x.art === 'Auslieferung' || x.art === 'Abholung');
     const kombiOk = (t) => !t.kombi || (finde(GERAETE, t.kombi.geraet) && finde(ORTE, t.kombi.ort) && t.art === 'Auslieferung');
     const kostenOk = (k) => k && Object.keys(KOSTEN_START).every((n) => Number.isFinite(k[n]) && k[n] >= 0);
-    if (s && Array.isArray(s.touren) && Array.isArray(s.sped) && Number.isSafeInteger(s.nr) && s.nr >= 0 && s.nr < 1e6 && kostenOk(s.kosten)
-      && s.touren.every((t) => auftragOk(t) && kombiOk(t) && finde(LKW, t.lkw) && finde(FAHRER, t.fahrer))
-      && s.sped.every((x) => auftragOk(x) && !('kombi' in x) && typeof x.grund === 'string')) {
-      const ids = [...s.touren, ...s.sped].map((x) => x.id);
+    if (s && Array.isArray(s.alleTouren) && Array.isArray(s.alleSped) && Number.isSafeInteger(s.nr) && s.nr >= 0 && s.nr < 1e6 && kostenOk(s.kosten)
+      && s.alleTouren.every((t) => auftragOk(t) && istTag(t.tag) && kombiOk(t) && finde(LKW, t.lkw) && finde(FAHRER, t.fahrer))
+      && s.alleSped.every((x) => auftragOk(x) && istTag(x.tag) && !('kombi' in x) && typeof x.grund === 'string')) {
+      const ids = [...s.alleTouren, ...s.alleSped].map((x) => x.id);
       if (new Set(ids).size !== ids.length) throw new Error('doppelte IDs');
       // Zähler hinter die höchste vorhandene Nummer setzen, damit neue IDs nie kollidieren
       s.nr = Math.max(s.nr, ...ids.map((id) => Number(id.slice(1)) || 0));
-      return s;
+      return tagesSicht(s);
     }
   } catch (e) { /* kein oder kaputter Speicher: Beispieldaten */ }
   return neuerStand();
@@ -83,19 +138,21 @@ const ende = (t) => { const p = phasen(t); return p[p.length - 1].bis; };
 const kmTour = (t) => phasen(t).filter((x) => x.typ === 'fahrt').reduce((s, x) => s + x.km, 0);
 const dauerEinfach = (art, ortId) => ende({ art, ort: ortId, geraet: GERAETE[0].id, start: 0 });
 function status(t, z = zeit) {
+  if (t.tag && t.tag < HEUTE) return 'erledigt';   // vergangene Tage sind gefahren, künftige geplant
+  if (t.tag && t.tag > HEUTE) return 'geplant';
   if (ende(t) <= z) return 'erledigt';
   return t.start <= z ? 'unterwegs' : 'geplant';
 }
-const phaseUm = (t, z = zeit) => phasen(t).find((x) => x.von <= z && z < x.bis) || null;
+const phaseUm = (t, z = zeit) => (t.tag && t.tag !== HEUTE ? null : phasen(t).find((x) => x.von <= z && z < x.bis) || null);
 const zielText = (t) => finde(ORTE, t.ort).name + (t.kombi ? ' + ' + finde(ORTE, t.kombi.ort).name : '');
 
 // ---------- Verfügbarkeit ----------
-function lkwFrei(lkwId, von, bis, ohne = []) {
-  return !stand.touren.some((t) => t.lkw === lkwId && !ohne.includes(t.id) && ueberlappt(von, bis, t.start, ende(t)));
+function lkwFrei(lkwId, von, bis, ohne = [], tag = datum) {
+  return !stand.alleTouren.some((t) => t.tag === tag && t.lkw === lkwId && !ohne.includes(t.id) && ueberlappt(von, bis, t.start, ende(t)));
 }
-function fahrerFrei(fahrerId, von, bis, ohne = []) {
-  if (finde(FAHRER, fahrerId).abwesend) return false;
-  return !stand.touren.some((t) => t.fahrer === fahrerId && !ohne.includes(t.id) && ueberlappt(von, bis, t.start, ende(t)));
+function fahrerFrei(fahrerId, von, bis, ohne = [], tag = datum) {
+  if (finde(FAHRER, fahrerId).abwesend && tag === HEUTE) return false; // heute krank
+  return !stand.alleTouren.some((t) => t.tag === tag && t.fahrer === fahrerId && !ohne.includes(t.id) && ueberlappt(von, bis, t.start, ende(t)));
 }
 const darfFahren = (f, l) => FS_RANG[f.fs] >= FS_RANG[l.fs];
 
@@ -138,21 +195,21 @@ function ladeplan(lkw, geraete) {
   return { plaetze, laenge, gewicht, hoehe, breite, probleme };
 }
 
-function kandidaten(art, geraetId, ortId, start) {
+function kandidaten(art, geraetId, ortId, start, tag = datum) {
   const g = finde(GERAETE, geraetId);
   const bis = start + dauerEinfach(art, ortId);
   return LKW.map((l) => ({
     lkw: l,
     pruefung: ladepruefung(g, l),
-    frei: lkwFrei(l.id, start, bis),
+    frei: lkwFrei(l.id, start, bis, [], tag),
     // kleinster ausreichender Führerschein zuerst, damit CE-Fahrer für Sattelzüge frei bleiben
-    fahrer: FAHRER.filter((f) => darfFahren(f, l) && fahrerFrei(f.id, start, bis)).sort((a, b) => FS_RANG[a.fs] - FS_RANG[b.fs]),
+    fahrer: FAHRER.filter((f) => darfFahren(f, l) && fahrerFrei(f.id, start, bis, [], tag)).sort((a, b) => FS_RANG[a.fs] - FS_RANG[b.fs]),
   }));
 }
 // Hätte ein eigener Lkw ohne Genehmigung fahren können?
 function interneAlternative(a) {
   if (a.start + dauerEinfach(a.art, a.ort) > TAG_ENDE) return null; // intern nicht mehr am selben Tag machbar
-  return kandidaten(a.art, a.geraet, a.ort, a.start)
+  return kandidaten(a.art, a.geraet, a.ort, a.start, a.tag || datum)
     .find((k) => k.pruefung.ergebnis === 'ok' && k.frei && k.fahrer.length) || null;
 }
 
@@ -166,13 +223,13 @@ function alternativenZuweisen() {
       const alt = interneAlternative(sp);
       ergebnis.set(sp.id, alt);
       if (alt) { // vorläufig belegen, damit der nächste Auftrag ihn nicht auch bekommt
-        const platzhalter = { ...sp, id: '_res' + sp.id, lkw: alt.lkw.id, fahrer: alt.fahrer[0].id };
-        stand.touren.push(platzhalter);
+        const platzhalter = { ...sp, id: '_res' + sp.id, tag: sp.tag || datum, lkw: alt.lkw.id, fahrer: alt.fahrer[0].id };
+        stand.alleTouren.push(platzhalter);
         reserviert.push(platzhalter);
       }
     }
   } finally { // nur die eigenen Platzhalter-Objekte entfernen, nie echte Touren mit gleicher ID
-    stand.touren = stand.touren.filter((t) => !reserviert.includes(t));
+    stand.alleTouren = stand.alleTouren.filter((t) => !reserviert.includes(t));
   }
   return ergebnis;
 }
@@ -182,7 +239,7 @@ function alternativenZuweisen() {
 const ABHOLFENSTER = 120; // Abholung darf sich um höchstens so viele Minuten verschieben
 function kombiVorschlaege() {
   const liste = [];
-  const offen = stand.touren.filter((t) => t.start > zeit); // nur, was noch nicht losgefahren ist
+  const offen = stand.touren.filter((t) => status(t) === 'geplant' && !t.id.startsWith('_')); // nur Geplantes, keine Platzhalter
   for (const a of offen) {
     if (a.art !== 'Auslieferung' || a.kombi) continue;
     const lkwA = finde(LKW, a.lkw);

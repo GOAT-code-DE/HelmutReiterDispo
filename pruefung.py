@@ -7,7 +7,7 @@ from playwright.sync_api import sync_playwright
 seite = pathlib.Path(sys.argv[1]).resolve().as_uri()
 aus = pathlib.Path(sys.argv[2])
 aus.mkdir(exist_ok=True)
-SPEICHER = 'reiter-dispo-demo-v2'
+SPEICHER = 'reiter-dispo-demo-v3'
 fehler, ergebnisse = [], []
 
 def pruefe(name, bed):
@@ -26,7 +26,8 @@ with sync_playwright() as p:
     pg = b.new_page(viewport={'width': 1600, 'height': 960})
     pg.on('console', lambda m: m.type == 'error' and fehler.append(m.text))
     pg.on('pageerror', lambda e: fehler.append(str(e)))
-    pg.goto(seite); pg.evaluate("localStorage.clear()"); pg.reload(); pg.wait_for_timeout(8000)
+    pg.goto(seite); pg.wait_for_function('m3Bereit', timeout=20000)  # Kartenstil fertig laden, sonst bricht der Reload ihn ab
+    pg.evaluate("localStorage.clear()"); pg.reload(); pg.wait_for_timeout(8000)
 
     # Layout: Karte sitzt rechts neben der Tourenliste, unter der Kopfzeile, und ist groß genug
     lage = pg.evaluate("""(() => { const k = document.querySelector('#kartenpanel').getBoundingClientRect(), l = document.querySelector('.liste-panel').getBoundingClientRect(),
@@ -152,14 +153,22 @@ with sync_playwright() as p:
 
     # Kosten und Kombi-Tour
     ansicht(pg, 'kosten', 500)
-    karte = pg.locator('#kombi-liste .karte', has_text='Düsseldorf + Krefeld')
+    karte = pg.locator('#kombi-liste .sparzeile', has_text='Düsseldorf + Krefeld')
     pruefe('Kosten: Kombi Düsseldorf + Krefeld vorgeschlagen', karte.count() == 1)
+    satz = pg.inner_text('#kosten-satz')
+    pruefe(f'Kosten: Tag in einem Satz ({satz[:60]}…)', 'eigene Touren rund' in satz and 'Speditionsaufträge' in satz and 'im Monat' in satz)
+    vor = pg.evaluate('stand.sped.length')
+    vor_t = pg.evaluate('stand.touren.length')
+    pg.locator('#sped-vorschlaege [data-selbst]').first.click(); pg.wait_for_timeout(400)
+    pruefe('Kosten: „Selbst fahren“ macht aus der Spedition eine eigene Tour', pg.evaluate('stand.sped.length') == vor - 1 and pg.evaluate('stand.touren.length') == vor_t + 1
+           and pg.get_attribute('.icons [data-ansicht="kosten"]', 'aria-selected') == 'true')
     pg.screenshot(path=str(aus / 'kosten.png'), full_page=True)
     karte.locator('button').click(); pg.wait_for_timeout(300)
-    pruefe('Kombi übernommen: 13 Touren', pg.locator('.tz[data-tour]').count() == 13)
+    pruefe('Kombi übernommen: eine Tour weniger', pg.evaluate('stand.touren.length') == vor_t)
     ansicht(pg, 'plantafel')
     pruefe('Kombi-Block in der Plantafel', pg.locator('.block[data-kombi="ja"]').count() == 1)
     ansicht(pg, 'kosten')
+    pg.click('#v-kosten details summary')
     pg.locator('#annahmen input[data-key="spedKm"]').fill('-5'); pg.dispatch_event('#annahmen input[data-key="spedKm"]', 'change')
     pruefe('Annahmen: negative Werte abgelehnt', pg.input_value('#annahmen input[data-key="spedKm"]') == '2.4')
 
@@ -210,10 +219,10 @@ with sync_playwright() as p:
         pruefe(f'{name}: Beispieldaten statt Absturz', pg.locator('.tz[data-tour]').count() == 13)
 
     # Zähler hinter vorhandene IDs, Alternativen nicht doppelt vergeben
-    pg.evaluate(f"""localStorage.setItem('{SPEICHER}', JSON.stringify({{touren:[{{id:'T101',lkw:'L01',fahrer:'F09',geraet:'G12',ort:'du',art:'Abholung',start:600}}], sped:[], nr:100,
+    pg.evaluate(f"""localStorage.setItem('{SPEICHER}', JSON.stringify({{alleTouren:[{{id:'T101',tag:'2026-10-06',lkw:'L01',fahrer:'F09',geraet:'G12',ort:'du',art:'Abholung',start:600}}], alleSped:[], nr:100,
         kosten:{{fahrerStunde:38,spedKm:2.4,spedGrund:140,schwerFaktor:2.5,arbeitstage:21}}}}))""")
     pg.reload(); pg.wait_for_timeout(1500)
-    pruefe('ID-Zähler hinter T101', pg.evaluate('stand.nr') >= 101)
+    pruefe('ID-Zähler hinter T101 (gültiger Speicher übernommen)', pg.evaluate('stand.nr') == 101 and pg.evaluate('stand.touren.length') == 1)
     doppelt = pg.evaluate("""(() => {
         stand.sped = [1,2,3].map(i => ({id:'SX'+i, geraet:'G09', ort:'du', art:'Auslieferung', start:600, spedition:'x', grund:'x'}));
         const einzeln = stand.sped.filter(interneAlternative).length;
@@ -245,6 +254,110 @@ with sync_playwright() as p:
         return {seitenleiste: n.height > 600 && n.width < 100, liste_links: l.right <= k.left + 1, kopf_oben: h.bottom <= l.top + 1, breite: document.documentElement.scrollWidth}; })()""")
     pruefe(f'iPad hochkant: Seitenleiste, Liste neben Karte ({lage})', lage['seitenleiste'] and lage['liste_links'] and lage['kopf_oben'] and lage['breite'] <= 820)
     ipad.screenshot(path=str(aus / 'ipad_hoch.png'))
+
+    # Tablet: jede Ansicht in drei iPad-Größen auf Überlappung, Überstand, Fingergröße und passende Kopfzeile prüfen
+    MIT_ZEIT, MIT_NEU = {'dashboard', 'plantafel', 'hof'}, {'dashboard', 'plantafel'}
+    LAYOUT_JS = """(() => {
+      const sichtbar = (e) => { const r = e.getBoundingClientRect(), s = getComputedStyle(e); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && !e.closest('[hidden], dialog:not([open])'); };
+      const dialog = document.querySelector('dialog[open]');               // offener Dialog: nur dessen Inhalt zählt
+      const elemente = [...(dialog || document).querySelectorAll('button, select, input, textarea, summary')].filter(sichtbar)
+        .filter((e) => !e.closest('.uhrzeiten, .touren, .icons, .tafel-rahmen, .tab-rahmen, .maplibregl-ctrl')); // Scrollbereiche und Kartenbibliothek ausgenommen
+      const boxen = elemente.map((e) => ({ e, r: e.getBoundingClientRect() }));
+      const name = (e) => (e.id || e.getAttribute('aria-label') || e.textContent || e.tagName).trim().slice(0, 30);
+      const ueberlappt = [];
+      for (let i = 0; i < boxen.length; i++) for (let j = i + 1; j < boxen.length; j++) {
+        const a = boxen[i], b = boxen[j];
+        if (a.e.contains(b.e) || b.e.contains(a.e)) continue;
+        const x = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left), y = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
+        if (x > 2 && y > 2) ueberlappt.push(name(a.e) + ' / ' + name(b.e));
+      }
+      const zuKlein = boxen.filter((b) => !(b.e.tagName === 'INPUT' && b.e.type === 'range')).filter((b) => b.r.height < 28 && b.r.width < 28).map((b) => name(b.e));
+      const raus = boxen.filter((b) => b.r.right > innerWidth + 1 || b.r.left < -1).map((b) => name(b.e));
+      return { ueberlappt, zuKlein, raus, breite: document.documentElement.scrollWidth,
+        zeit: !!document.querySelector('.zeitleiste').offsetParent, neu: !!document.querySelector('#neu-knopf').offsetParent,
+        leerText: /\\b(null|undefined|NaN)\\b|\\[object/.test((dialog || document.body).innerText) };
+    })()"""
+    for (tw, th) in [(1180, 820), (820, 1180), (1366, 1024)]:
+        t = b.new_page(viewport={'width': tw, 'height': th}, has_touch=True)
+        t.on('pageerror', lambda e: fehler.append(f'Tablet: {e}'))
+        t.goto(seite); t.wait_for_timeout(3500)
+        for v in ['dashboard', 'plantafel', 'hof', 'ladeplan', 'spedition', 'kosten', 'fuhrpark']:
+            t.click(f'.icons [data-ansicht="{v}"]'); t.wait_for_timeout(900)
+            z = t.evaluate(LAYOUT_JS)
+            pruefe(f'Tablet {tw}x{th} {v}: nichts überlappt oder ragt heraus {z["ueberlappt"][:3]}{z["raus"][:3]}', not z['ueberlappt'] and not z['raus'] and z['breite'] <= tw)
+            pruefe(f'Tablet {tw}x{th} {v}: Knöpfe fingergroß {z["zuKlein"][:3]}', not z['zuKlein'])
+            pruefe(f'Tablet {tw}x{th} {v}: kein null/undefined im Text', not z['leerText'])
+            pruefe(f'Tablet {tw}x{th} {v}: Kopfzeile passend (Zeit {z["zeit"]}, Neu {z["neu"]})', z['zeit'] == (v in MIT_ZEIT) and z['neu'] == (v in MIT_NEU))
+        t.click('.icons [data-ansicht="dashboard"]'); t.wait_for_timeout(500)
+        for dialog in ['neu', 'tour']:
+            if dialog == 'tour':
+                t.click('.tz[data-tour="T04"]'); t.wait_for_timeout(600); t.click('#tour-detail .knopf.zweit'); t.wait_for_timeout(400)
+            else:
+                t.click('#neu-knopf'); t.wait_for_timeout(400)
+            z = t.evaluate(LAYOUT_JS)
+            pruefe(f'Tablet {tw}x{th} Dialog {dialog}: nichts überlappt {z["ueberlappt"][:3]}{z["raus"][:3]}', not z['ueberlappt'] and not z['raus'])
+            pruefe(f'Tablet {tw}x{th} Dialog {dialog}: kein null/undefined im Text', not z['leerText'])
+            t.screenshot(path=str(aus / f'tablet_{tw}_dialog_{dialog}.png'))
+            t.keyboard.press('Escape'); t.wait_for_timeout(300)
+        t.close()
+
+    # Planung über Tage: Datum wechseln, in drei Wochen einplanen, Woche und Monat
+    pg.evaluate('localStorage.clear()'); pg.goto(seite); pg.wait_for_timeout(2500)
+    pg.click('#tag-vor'); pg.wait_for_timeout(500)
+    pruefe('Datum vor: Liste zeigt den nächsten Tag', 'Mi 07.10.' in pg.inner_text('#touren-titel') and pg.locator('.tz[data-tour]').count() > 0
+           and pg.locator('#gruppe-unterwegs .tz').count() == 0)
+    pg.click('#tag-heute'); pg.wait_for_timeout(500)
+    pruefe('Heute: wieder 13 Touren', pg.locator('.tz[data-tour]').count() == 13)
+    pg.click('#neu-knopf'); pg.wait_for_timeout(300)
+    pg.fill('#f-tag', '2026-10-27'); pg.dispatch_event('#f-tag', 'change'); pg.wait_for_timeout(300)
+    frei_spaeter = pg.locator('#f-kandidaten .kandidat').count()
+    pruefe(f'In drei Wochen: Prüfung für diesen Tag ({frei_spaeter} Lkw frei)', frei_spaeter >= 2 and 'Dienstag, 27. Oktober' in pg.inner_text('#f-info'))
+    pg.locator('#f-kandidaten .kandidat').first.locator('[data-einplanen]').click(); pg.wait_for_timeout(800)
+    pruefe('Nach dem Einplanen: Ansicht springt auf den 27.10.', pg.input_value('#datum-eingabe') == '2026-10-27' and 'Hamm' in pg.inner_text('#tour-liste'))
+    pg.reload(); pg.wait_for_timeout(2000)
+    pruefe('Künftige Tour bleibt nach Neuladen erhalten', pg.evaluate("stand.alleTouren.some(t => t.tag === '2026-10-27' && t.ort === 'ha')"))
+    pg.click('.icons [data-ansicht="plantafel"]'); pg.wait_for_timeout(400)
+    pg.click('.plan-reiter [data-plan="woche"]'); pg.wait_for_timeout(400)
+    pruefe('Woche: 6 Tagesspalten, Touren als Einträge', pg.locator('.woche th').count() == 7 and pg.locator('.woche .wchip').count() > 10)
+    pruefe('Woche: Uhrzeit-Leiste ausgeblendet', not pg.locator('.zeitleiste').is_visible())
+    pg.locator('.woche .wchip').first.click(); pg.wait_for_timeout(800)
+    pruefe('Klick in der Woche öffnet die Tour in „Touren“', pg.get_attribute('.icons [data-ansicht="dashboard"]', 'aria-selected') == 'true' and pg.locator('.tz.aktiv').count() == 1)
+    pg.click('.icons [data-ansicht="plantafel"]'); pg.click('.plan-reiter [data-plan="monat"]'); pg.wait_for_timeout(400)
+    pruefe('Monat: Kalender mit Tagen', pg.locator('.monat .mtag').count() >= 28)
+    pg.locator('.mtag[data-tag="2026-10-14"]').click(); pg.wait_for_timeout(400)
+    pruefe('Klick im Monat öffnet den Tag', pg.input_value('#datum-eingabe') == '2026-10-14' and pg.get_attribute('.plan-reiter [data-plan="tag"]', 'aria-selected') == 'true')
+    pruefe('Erzeugte Touren anderer Tage auf Viertelstunden', pg.evaluate("stand.alleTouren.filter(t => t.tag !== '2026-10-06').every(t => t.start % 15 === 0)"))
+    pruefe('Vergangene Tage gelten als erledigt', pg.evaluate("stand.alleTouren.filter(t => t.tag < '2026-10-06').every(t => status(t) === 'erledigt')"))
+    pruefe('Belegung je Tag getrennt: anderer Tag stört heute nicht', pg.evaluate("(() => { const t = stand.alleTouren.find(x => x.tag === '2026-10-27' && x.ort === 'ha'); return lkwFrei(t.lkw, t.start, t.start + 10, [], '2026-10-06') || stand.alleTouren.some(x => x.tag === '2026-10-06' && x.lkw === t.lkw && x.start < t.start + 10 && t.start < ende(x)); })()"))
+    pg.click('#tag-heute'); pg.wait_for_timeout(300)
+
+    # Nachweise zu den Codex-Funden
+    passt = pg.evaluate("""GERAETE.every(g => { const m = geraetKoerper(g); m.updateMatrixWorld(true); const b = new THREE.Box3().setFromObject(m);
+        return b.max.y <= g.h + 0.001 && b.max.x - b.min.x <= g.l + 0.001 && b.max.z - b.min.z <= g.b + 0.001; })""")
+    pruefe('Modelle liegen innerhalb ihrer Transportmaße', passt)
+    ansicht(pg, 'hof', 1500)
+    stapler_ok = pg.evaluate("""(() => { const a = hofPlaene().auftraege; return [0, 1].every(k => { const x = a.filter(y => y.stapler === k).sort((p, q) => p.von - q.von);
+        return x.every((y, i) => i === 0 || y.von >= x[i - 1].bis); }); })()""")
+    pruefe('Stapler nie doppelt belegt', stapler_ok)
+    rampen_ok = pg.evaluate("""(() => { const e = [...rampenPlan().values()]; return RAMPEN.every((_, r) => {
+        const x = e.filter(y => y.rampe === r).sort((p, q) => p.beginn - q.beginn); return x.every((y, i) => i === 0 || y.beginn >= x[i - 1].ende); }); })()""")
+    pruefe('Rampe erst frei, wenn der Stapler fertig ist', rampen_ok)
+    warte_ok = pg.evaluate("""(() => { const z0 = zeit, plan = rampenPlan(); let ok = true;
+        for (const a of hofPlaene().auftraege) { const r = plan.get(`${a.t.id}|${a.phase.von}`);
+          for (let m = a.phase.bis; m < a.bis; m += 1) { zeit = m; const zst = lkwZustaende()[a.l.id];
+            if (m < r.beginn ? zst.rampe !== undefined || zst.warteplatz === undefined : zst.rampe !== r.rampe) ok = false; } }
+        zeit = z0; return ok; })()""")
+    pruefe('Verspäteter Lkw: wartend in der Schlange, sonst an seiner Rampe', warte_ok)
+    verz = pg.evaluate("""(() => { const t = stand.touren.find(x => x.id === 'T05'), a = hofPlaene().auftraege.find(x => x.t.id === 'T05' && x.art === 'laden');
+        const fp = hofPlaene().fahrplaene.L08, pose = lkwPose(fp, a.bis - 1), z0 = zeit;
+        zeit = a.bis - 1; const zst = lkwZustaende().L08; zeit = z0;
+        return { verspaetet: a.bis > t.start + 30, amDock: Math.abs(pose.x - RAMPEN[a.rampe].x) < 0.5, tabelle: zst.rampe === a.rampe }; })()""")
+    pruefe(f'Verspätung durch Rampen-Engpass überall gleich ({verz})', all(verz.values()))
+    ansicht(pg, 'dashboard', 600)
+    pg.click('#tag-vor'); pg.wait_for_timeout(300)
+    pruefe('Anderer Tag: Uhrzeit ausgeblendet, keine laufenden Abschnitte', not pg.locator('.zeitleiste').is_visible() and pg.evaluate('stand.touren.every(t => !phaseUm(t))'))
+    pg.click('#tag-heute'); pg.wait_for_timeout(300)
+    pruefe('Heute: Uhrzeit wieder sichtbar', pg.locator('.zeitleiste').is_visible())
 
     # Handy
     m = b.new_page(viewport={'width': 390, 'height': 844})

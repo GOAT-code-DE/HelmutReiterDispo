@@ -3,6 +3,23 @@
 
 const TAG_START = 6 * 60, TAG_ENDE = 19 * 60, SPANNE = TAG_ENDE - TAG_START;
 const DEMO_JETZT = 10 * 60 + 30;
+const HEUTE = '2026-10-06';               // Demo-Datum (Dienstag)
+
+// ---------- Datum als Zeichenkette JJJJ-MM-TT (Mittag UTC, damit Sommerzeit nichts verschiebt) ----------
+const WOCHENTAGE = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+const WOCHENTAGE_LANG = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
+const MONATE = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+const tagDatum = (tag) => new Date(tag + 'T12:00:00Z');
+const tagPlus = (tag, n) => { const x = tagDatum(tag); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+const wochentag = (tag) => tagDatum(tag).getUTCDay();
+const tagKurz = (tag) => `${WOCHENTAGE[wochentag(tag)]} ${tag.slice(8)}.${tag.slice(5, 7)}.`;
+const tagLang = (tag) => `${WOCHENTAGE_LANG[wochentag(tag)]}, ${Number(tag.slice(8))}. ${MONATE[Number(tag.slice(5, 7)) - 1]}`;
+const wochenStart = (tag) => tagPlus(tag, -((wochentag(tag) + 6) % 7));
+function kalenderwoche(tag) { // ISO-Kalenderwoche
+  const donnerstag = tagPlus(wochenStart(tag), 3), jan4 = donnerstag.slice(0, 4) + '-01-04';
+  return 1 + Math.round((tagDatum(wochenStart(donnerstag)) - tagDatum(wochenStart(jan4))) / 604800000);
+}
+const istTag = (x) => typeof x === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x) && tagPlus(x, 0) === x;
 const MAX_HOEHE = 4.0, MAX_BREITE = 2.55; // StVZO, darüber nur mit Genehmigung
 const LADEN_MIN = 30, KMH = 50, STRASSENFAKTOR = 1.3;
 const FS_RANG = { B: 1, C: 2, CE: 3 };

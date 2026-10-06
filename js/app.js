@@ -30,6 +30,11 @@ const ICONS = {
   lkw: 'M2 6h12v10H2zM14 9h4l3 3v4h-7M5 18a2 2 0 1 0 4 0a2 2 0 1 0-4 0M15 18a2 2 0 1 0 4 0a2 2 0 1 0-4 0',
   spedition: 'M4 8h13l-3-3M20 16H7l3 3',
   reset: 'M4 12a8 8 0 1 0 2.3-5.6M4 4v4h4',
+  abspielen: 'M8 5v14l11-7z',
+  links: 'M15 6l-6 6 6 6',
+  rechts: 'M9 6l6 6-6 6',
+  anhalten: 'M7 5h4v14H7zM13 5h4v14h-4z',
+  schliessen: 'M6 6l12 12M18 6L6 18',
   aufladen: 'M12 15V4M8 8l4-4 4 4M5 20h14',
   abladen: 'M12 4v11M8 11l4 4 4-4M5 20h14',
   ziel: 'M5 21V4h11l-2 4 2 4H5',
@@ -50,9 +55,11 @@ function renderKpis() {
   const vermeidbar = stand.sped.filter((x) => alternativen.get(x.id));
   const vermeidbarEuro = vermeidbar.reduce((s, x) => s + kostenSpedition(x) - kostenAlternative(x, alternativen.get(x.id)), 0);
   const kpi = (wert, name, warn) => el('div', { class: 'kpi' + (warn ? ' warn' : '') }, el('span', { class: 'wert' }, wert), el('span', { class: 'name' }, name));
+  const imEinsatz = new Set(stand.touren.map((t) => t.lkw)).size;
   $('#kpis').replaceChildren(
-    kpi(`${LKW.length - weg}/${LKW.length}`, 'Lkw am Hof'),
-    kpi(stand.touren.filter((t) => status(t) === 'unterwegs').length, 'unterwegs'),
+    ...(datum === HEUTE
+      ? [kpi(`${LKW.length - weg}/${LKW.length}`, 'Lkw am Hof'), kpi(stand.touren.filter((t) => status(t) === 'unterwegs').length, 'unterwegs')]
+      : [kpi(stand.touren.length, 'Touren'), kpi(`${imEinsatz}/${LKW.length}`, 'Lkw im Einsatz')]),
     kpi(`${vermeidbar.length} · ${euro(vermeidbarEuro)}`, 'Spedition vermeidbar', vermeidbar.length > 0),
   );
 }
@@ -66,7 +73,7 @@ function tourZeile(t) {
     title: `${t.art} ${zielText(t)} · ${l.kz} · ${g.name} · ${finde(FAHRER, t.fahrer).name}` },
     el('span', { class: 'tz-zeit' }, hhmm(t.start)),
     el('span', { class: 'tz-text' }, el('b', {}, zielText(t)), el('small', {}, `${l.kz} · ${g.kurz}`)),
-    el('span', { class: 'tz-info' }, st === 'unterwegs' ? `zurück ${hhmm(ende(t))}` : st === 'erledigt' ? '✓' : `${kmTour(t)} km`));
+    el('span', { class: 'tz-info' }, st === 'unterwegs' ? `zurück ${hhmm(ende(t))}` : st === 'erledigt' ? 'fertig' : `${kmTour(t)} km`));
 }
 function renderListe() {
   const q = $('#suche').value.trim().toLowerCase();
@@ -89,6 +96,7 @@ function renderListe() {
     el('span', { class: 'tz-text' }, el('b', {}, finde(ORTE, s.ort).name), el('small', {}, `${s.spedition} · ${finde(GERAETE, s.geraet).kurz}`)),
     alternativen.get(s.id) ? marke('vermeidbar', 'warn') : marke('ok', 'grau')));
   $('#touren-zahl').textContent = stand.touren.length;
+  $('#touren-titel').textContent = datum === HEUTE ? 'Touren heute' : `Touren ${tagKurz(datum)}`;
   $('#tour-liste').replaceChildren(...[
     gruppe('unterwegs', 'Unterwegs', nach('unterwegs')),
     gruppe('geplant', 'Als Nächstes', nach('geplant')),
@@ -157,7 +165,7 @@ function renderDetail() {
   const zeile = (k, v) => [el('dt', {}, k), el('dd', {}, v)];
   $('#tour-detail').replaceChildren(
     el('h2', {}, 'Tourdetails', marke(st, st === 'unterwegs' ? 'unterwegs' : st === 'erledigt' ? 'grau' : 'frei')),
-    el('div', { class: 'hinweis' }, p ? (p.typ === 'fahrt' ? `Fahrt ${ortName(p.von_ort)} → ${ortName(p.nach)}, an ${hhmm(p.bis)}` : `${p.text} bis ${hhmm(p.bis)}`) : st === 'erledigt' ? 'Zurück am Hof' : `Abfahrt um ${hhmm(t.start)}`),
+    el('div', { class: 'hinweis' }, p ? (p.typ === 'fahrt' ? `Fahrt nach ${ortName(p.nach)}, Ankunft ${hhmm(p.bis)}` : `${p.text} bis ${hhmm(p.bis)}`) : st === 'erledigt' ? 'Zurück am Hof' : `Abfahrt um ${hhmm(t.start)}`),
     el('div', { class: 'bild' }, lkwBild(l, p?.ladung ? finde(GERAETE, p.ladung) : (st === 'geplant' && t.art === 'Auslieferung' ? g : null))),
     el('dl', { class: 'zeilen' },
       ...zeile('Lkw', `${l.kz} · ${l.typ}`),
@@ -166,14 +174,14 @@ function renderDetail() {
       ...zeile('Ziel', zielText(t)),
       ...zeile('Strecke', `${kmTour(t)} km`),
       ...zeile('Dauer', `${ende(t) - t.start} Min. · zurück ${hhmm(ende(t))}`),
-      ...zeile('Ladung', [t.geraet, t.kombi?.geraet].filter(Boolean).map((x) => finde(GERAETE, x).kurz).join(' → ')),
+      ...zeile('Ladung', [t.geraet, t.kombi?.geraet].filter(Boolean).map((x) => finde(GERAETE, x).kurz).join(', danach ')),
       ...zeile('Gewicht', `${zahl(g.gewicht, 1)} von ${zahl(l.nutzlast, 1)} t`)),
     el('div', { class: 'kennbox' + (pr.ergebnis === 'ok' ? '' : ' warnung') },
       el('div', {}, el('b', {}, `${zahl(l.ladehoehe + g.h)} m`), el('span', {}, 'Gesamthöhe')),
       el('div', {}, el('b', {}, `${zahl(l.nutzlast - g.gewicht, 1)} t`), el('span', {}, 'Restnutzlast')),
       el('div', {}, el('b', {}, pr.ergebnis === 'ok' ? 'passt' : 'prüfen'), el('span', {}, 'Ladeprüfung'))),
     el('div', { class: 'knopfreihe' },
-      el('button', { class: 'knopf klein', onclick: () => ladeplanOeffnen(t.lkw, [t.geraet]) }, '3D-Ladeplan'),
+      el('button', { class: 'knopf klein', onclick: () => ladeplanOeffnen(t.lkw, [t.geraet], t) }, '3D-Ladeplan'),
       el('button', { class: 'knopf zweit klein', onclick: () => zeigeTour(t.id) }, 'Bearbeiten')));
 }
 
@@ -188,7 +196,7 @@ function renderAblauf() {
     el('ol', { class: 'ablauf-liste' }, ...ph.map((p) => el('li', { class: zustand(p) },
       icon(SCHRITT_ICON(p)),
       el('span', { class: 'al-zeit' }, hhmm(p.von)),
-      el('span', {}, p.typ === 'fahrt' ? `Fahrt ${ortName(p.von_ort)} → ${ortName(p.nach)}` : `${p.text} · ${ortName(p.wo)}`,
+      el('span', {}, p.typ === 'fahrt' ? `Fahrt nach ${ortName(p.nach)}` : `${p.text} · ${ortName(p.wo)}`,
         el('small', {}, p.typ === 'fahrt' ? `${p.km} km · ${p.ladung ? finde(GERAETE, p.ladung).kurz : 'leer'}` : `bis ${hhmm(p.bis)} · ${finde(GERAETE, p.ladung).kurz}`))))));
 }
 function renderTourKosten() {
@@ -208,10 +216,11 @@ function renderTourKosten() {
     el('div', { class: 'befund ' + (sped > intern ? 'ok' : 'vermeidbar') },
       sped > intern ? `Eigener Lkw spart ca. ${euro(sped - intern)}` : `Spedition wäre ca. ${euro(intern - sped)} günstiger`));
 }
+const tageText = () => `${stand.touren.length} Touren ${datum === HEUTE ? 'heute' : 'am ' + tagKurz(datum)}`;
 function renderGewaehlt() {
   renderDetail(); renderAblauf(); renderTourKosten();
   const t = finde(stand.touren, gewaehlt);
-  $('#karte-unterzeile').textContent = t ? `${t.id} · ${zielText(t)} · ${kmTour(t)} km · ${stand.touren.length} Touren heute` : `${stand.touren.length} Touren heute`;
+  $('#karte-unterzeile').textContent = t ? `${t.id} · ${zielText(t)} · ${kmTour(t)} km · ${tageText()}` : tageText();
 }
 function waehleTour(id, fokus = true) {
   gewaehlt = id;
@@ -233,15 +242,18 @@ function setzeZeit(m) {
   renderKpis();
   renderListe();
   if (ansicht === 'dashboard') { renderGewaehlt(); karte3dZeit(); }
-  if (ansicht === 'plantafel') renderTafel();
+  if (ansicht === 'plantafel') renderPlan();
   if (ansicht === 'hof') hofAktualisieren();
   if (ansicht === 'fuhrpark') renderFuhrpark();
   if (ansicht === 'kosten') renderKosten();
 }
+function abspielKnopf(laeuft) {
+  $('#zeit-play').replaceChildren(icon(laeuft ? 'anhalten' : 'abspielen'), el('span', {}, laeuft ? 'Anhalten' : 'Abspielen'));
+}
 function abspielenUmschalten() {
-  if (abspielen) { clearInterval(abspielen); abspielen = null; $('#zeit-play').textContent = '▶ Abspielen'; return; }
+  if (abspielen) { clearInterval(abspielen); abspielen = null; abspielKnopf(false); return; }
   if (zeit >= TAG_ENDE) setzeZeit(TAG_START);
-  $('#zeit-play').textContent = '⏸ Anhalten';
+  abspielKnopf(true);
   abspielStand = zeit;
   abspielen = setInterval(() => { // zehnmal pro Sekunde, Tempo in Minuten pro Sekunde
     if (zeit >= TAG_ENDE) { abspielenUmschalten(); return; }
@@ -283,7 +295,7 @@ function renderTafel() {
         style: `left:${links}%;width:${breite}%`,
         title: `${t.art} ${zielText(t)}, ${hhmm(t.start)}–${hhmm(ende(t))}, ${g.name}, ${f.name}`,
         onclick: () => zeigeTour(t.id),
-      }, el('b', {}, `${t.art === 'Abholung' ? '←' : '→'} ${zielText(t)}`), el('span', {}, `${g.kurz}${t.kombi ? ' + ' + finde(GERAETE, t.kombi.geraet).kurz : ''} · ${f.name.split(' ')[0]}`)));
+      }, el('b', {}, zielText(t)), el('span', {}, `${g.kurz}${t.kombi ? ' + ' + finde(GERAETE, t.kombi.geraet).kurz : ''} · ${f.name.split(' ')[0]}`)));
     }
     return el('div', { class: 'zeile' },
       el('div', { class: 'label' }, el('strong', {}, l.kz), el('small', {}, l.typ), el('small', {}, `${zahl(l.nutzlast, 1)} t · ${zahl(l.laenge, 1)} m · Kl. ${l.fs}`)),
@@ -315,12 +327,12 @@ function zeigeTour(id) {
       el('tr', {}, el('th', {}, 'Zeit'), el('th', {}, 'Abschnitt'), el('th', { class: 'zahl' }, 'km'), el('th', {}, 'Ladung')),
       ...phasen(t).map((p) => el('tr', { class: p.von <= zeit && zeit < p.bis ? 'aktiv' : '' },
         el('td', {}, `${hhmm(p.von)}–${hhmm(p.bis)}`),
-        el('td', {}, p.typ === 'fahrt' ? `Fahrt ${ortName(p.von_ort)} → ${ortName(p.nach)}` : `${p.text} (${ortName(p.wo)})`),
+        el('td', {}, p.typ === 'fahrt' ? `Fahrt von ${ortName(p.von_ort)} nach ${ortName(p.nach)}` : `${p.text} (${ortName(p.wo)})`),
         el('td', { class: 'zahl' }, p.typ === 'fahrt' ? p.km : ''),
         el('td', {}, p.ladung ? finde(GERAETE, p.ladung).kurz : el('span', { class: 'g-genehmigung' }, 'leer')))))),
     el('div', { class: 'knopfreihe' },
       el('button', { class: 'knopf klein', onclick: () => { $('#dlg-tour').close(); waehleTour(t.id); } }, 'Auf der Karte zeigen'),
-      el('button', { class: 'knopf zweit klein', onclick: () => ladeplanOeffnen(t.lkw, [t.geraet]) }, '3D-Ladeplan'),
+      el('button', { class: 'knopf zweit klein', onclick: () => ladeplanOeffnen(t.lkw, [t.geraet], t) }, '3D-Ladeplan'),
       el('button', { class: 'knopf zweit klein', onclick: () => {
         stand.touren = stand.touren.filter((x) => x.id !== id);
         if (gewaehlt === id) gewaehlt = standardTour();
@@ -328,6 +340,90 @@ function zeigeTour(id) {
       } }, 'Tour stornieren')),
   );
   $('#dlg-tour').showModal();
+}
+
+// ---------- Planung: Tag, Woche, Monat ----------
+let planAnsicht = 'tag';
+function planReiter(art) {
+  if (abspielen && art !== 'tag') abspielenUmschalten();
+  planAnsicht = art;
+  $('.app').dataset.plan = art;
+  document.querySelectorAll('.plan-reiter button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.plan === art)));
+  for (const a of ['tag', 'woche', 'monat']) $('#plan-' + a).hidden = a !== art;
+  renderPlan();
+}
+function renderPlan() {
+  if (planAnsicht === 'woche') renderWoche();
+  else if (planAnsicht === 'monat') renderMonat();
+  else renderTafel();
+}
+const toureAm = (tag) => stand.alleTouren.filter((t) => t.tag === tag).sort((a, b) => a.start - b.start);
+function navKnopf(richtung, text, aktion) {
+  return el('button', { class: 'knopf zweit klein symbol', 'aria-label': text, title: text, onclick: aktion }, icon(richtung));
+}
+function renderWoche() {
+  const start = wochenStart(datum), tage = [0, 1, 2, 3, 4, 5].map((i) => tagPlus(start, i));
+  const zelleKlasse = (tag) => [tag === HEUTE ? 'heute' : '', tag === datum ? 'gewaehlt' : ''].join(' ').trim();
+  const kopf = el('tr', {}, el('th', {}, 'Lkw'), ...tage.map((tag) => {
+    const tt = toureAm(tag), frei = LKW.length - new Set(tt.map((t) => t.lkw)).size;
+    return el('th', { class: zelleKlasse(tag) }, el('button', { onclick: () => { datumSetzen(tag); planReiter('tag'); }, title: `${tagLang(tag)} öffnen` },
+      tagKurz(tag), el('small', {}, `${tt.length} Touren · ${frei} Lkw frei`)));
+  }));
+  const zeilen = LKW.map((l) => el('tr', {}, el('td', { class: 'lkw' }, l.kz, el('small', {}, `${zahl(l.nutzlast, 1)} t`)),
+    ...tage.map((tag) => {
+      const tt = toureAm(tag).filter((t) => t.lkw === l.id);
+      return el('td', { class: zelleKlasse(tag) }, ...(tt.length ? tt.map((t) => el('button', {
+        class: 'wchip ' + (t.kombi ? 'kombi' : t.art === 'Abholung' ? 'abholung' : ''), 'data-tour': t.id,
+        title: `${t.art} ${zielText(t)} · ${finde(GERAETE, t.geraet).name}`,
+        onclick: () => { datumSetzen(tag); waehleTour(t.id); },
+      }, el('b', {}, hhmm(t.start)), zielText(t))) : [el('span', { class: 'frei' }, 'frei')]));
+    })));
+  const sped = el('tr', {}, el('td', { class: 'lkw' }, 'Spedition'), ...tage.map((tag) => {
+    const n = stand.alleSped.filter((x) => x.tag === tag).length;
+    return el('td', { class: zelleKlasse(tag) }, n ? `${n} Auftr${n === 1 ? 'ag' : 'äge'}` : el('span', { class: 'frei' }, '–'));
+  }));
+  $('#plan-woche').replaceChildren(
+    el('div', { class: 'plan-nav' },
+      navKnopf('links', 'Vorherige Woche', () => datumSetzen(tagPlus(datum, -7))),
+      el('strong', {}, `KW ${kalenderwoche(start)} · ${tagKurz(tage[0])} bis ${tagKurz(tage[5])}`),
+      navKnopf('rechts', 'Nächste Woche', () => datumSetzen(tagPlus(datum, 7)))),
+    el('div', { class: 'tab-rahmen' }, el('table', { class: 'woche' }, kopf, ...zeilen, sped)));
+}
+function renderMonat() {
+  const erster = datum.slice(0, 8) + '01';
+  let tag = wochenStart(erster);
+  const zellen = WOCHENTAGE.slice(1).concat('So').map((w) => el('div', { class: 'wtag' }, w));
+  do {
+    for (let i = 0; i < 7; i++, tag = tagPlus(tag, 1)) {
+      const tt = toureAm(tag), einsatz = new Set(tt.map((t) => t.lkw)).size, sp = stand.alleSped.filter((x) => x.tag === tag).length;
+      const t0 = tag;
+      zellen.push(el('button', {
+        class: ['mtag', tag.slice(5, 7) !== erster.slice(5, 7) ? 'anders' : '', wochentag(tag) % 6 === 0 ? 'wochenende' : '', tag === HEUTE ? 'heute' : '', tag === datum ? 'gewaehlt' : ''].join(' ').trim(),
+        'data-tag': tag, title: `${tagLang(tag)} öffnen`, onclick: () => { datumSetzen(t0); planReiter('tag'); },
+      }, el('span', { class: 'zahl-tag' }, String(Number(tag.slice(8)))),
+      ...(tt.length ? [el('span', {}, `${tt.length} Touren`), el('span', { class: 'auslastung' }, el('i', { style: `width:${einsatz / LKW.length * 100}%` })),
+        el('small', {}, `${einsatz} von ${LKW.length} Lkw`)] : []),
+      ...(sp ? [el('small', {}, `${sp} Spedition`)] : [])));
+    }
+  } while (tag.slice(5, 7) === erster.slice(5, 7));
+  const vorMonat = tagPlus(erster, -1).slice(0, 8) + '01', nachMonat = tagPlus(erster, 32).slice(0, 8) + '01';
+  $('#plan-monat').replaceChildren(
+    el('div', { class: 'plan-nav' },
+      navKnopf('links', 'Vorheriger Monat', () => datumSetzen(vorMonat)),
+      el('strong', {}, `${MONATE[Number(erster.slice(5, 7)) - 1]} ${erster.slice(0, 4)}`),
+      navKnopf('rechts', 'Nächster Monat', () => datumSetzen(nachMonat))),
+    el('div', { class: 'monat' }, ...zellen));
+}
+
+// ---------- Datum ----------
+function datumSetzen(tag) {
+  if (!istTag(tag)) return;
+  if (abspielen && tag !== HEUTE) abspielenUmschalten();
+  datum = tag;
+  $('#datum-eingabe').value = tag;
+  if (!finde(stand.touren, gewaehlt)) gewaehlt = standardTour();
+  allesNeu();
+  if (ansicht === 'dashboard' && gewaehlt) fokusTour(gewaehlt);
 }
 
 // ---------- Neuer Transport ----------
@@ -341,7 +437,8 @@ function feldMinuten(sel) {
 }
 const startMinuten = () => feldMinuten('#f-start');
 
-const auftragAusFormular = () => ({ art: $('#f-art').value, geraet: $('#f-geraet').value, ort: $('#f-ort').value, start: startMinuten() });
+const feldTag = (sel) => { const v = $(sel).value; const tag = istTag(v) && v >= HEUTE ? v : (datum >= HEUTE ? datum : HEUTE); $(sel).value = tag; return tag; };
+const auftragAusFormular = () => ({ art: $('#f-art').value, geraet: $('#f-geraet').value, ort: $('#f-ort').value, start: startMinuten(), tag: feldTag('#f-tag') });
 
 function renderNeu() {
   const a = auftragAusFormular();
@@ -350,28 +447,28 @@ function renderNeu() {
   const zuSpaet = bis > TAG_ENDE;
   $('#f-info').replaceChildren(
     el('strong', {}, g.name), ` · ${zahl(g.gewicht, 1)} t · ${zahl(g.l)} × ${zahl(g.b)} × ${zahl(g.h)} m`,
-    el('br'), `${ort.name}, ${ort.km} km · Lkw belegt ${hhmm(a.start)}–${hhmm(bis)}`,
-    zuSpaet ? el('div', { class: 'g-nein' }, `Rückkehr nach ${hhmm(TAG_ENDE)} Uhr – bitte früher abfahren.`) : null);
+    el('br'), `${tagLang(a.tag)} · ${ort.name}, ${ort.km} km · Lkw belegt ${hhmm(a.start)}–${hhmm(bis)}`,
+    ...(zuSpaet ? [el('div', { class: 'g-nein' }, `Rückkehr nach ${hhmm(TAG_ENDE)} Uhr – bitte früher abfahren.`)] : []));
 
-  const liste = kandidaten(a.art, a.geraet, a.ort, a.start);
+  const liste = kandidaten(a.art, a.geraet, a.ort, a.start, a.tag);
   const rang = (k) => (k.pruefung.ergebnis === 'ok' && k.frei && k.fahrer.length ? 0 : k.pruefung.ergebnis === 'ok' ? 1 : k.pruefung.ergebnis === 'genehmigung' ? 2 : 3);
   liste.sort((x, y) => rang(x) - rang(y) || x.lkw.nutzlast - y.lkw.nutzlast);
-  const zeilen = liste.map((k) => {
-    const gruende = k.pruefung.gruende.map((x) => el('div', { class: 'g-' + x.art }, x.txt));
-    if (k.pruefung.ergebnis !== 'nein' && !k.frei) gruende.push(el('div', { class: 'g-nein' }, 'zu der Zeit schon verplant'));
-    if (k.pruefung.ergebnis !== 'nein' && k.frei && !k.fahrer.length) gruende.push(el('div', { class: 'g-nein' }, `kein freier Fahrer mit Klasse ${k.lkw.fs}`));
-    if (k.pruefung.ergebnis === 'genehmigung') gruende.push(el('div', { class: 'g-genehmigung' }, 'erst nach erteilter Genehmigung einplanbar'));
-    const aktion = el('div', { class: 'aktion' },
-      el('button', { class: 'knopf zweit klein', title: 'Im 3D-Ladeplan weiterplanen', onclick: () => ladeplanOeffnen(k.lkw.id, [a.geraet], a) }, '3D'));
-    if (k.pruefung.ergebnis === 'ok' && k.frei && k.fahrer.length && !zuSpaet) {
-      const wahl = el('select', { 'aria-label': `Fahrer für ${k.lkw.kz}` }, ...k.fahrer.map((f) => el('option', { value: f.id }, `${f.name} (${f.fs})`)));
-      aktion.append(wahl, el('button', { class: 'knopf klein', 'data-einplanen': k.lkw.id, onclick: () => einplanen(a, k.lkw.id, wahl.value) }, 'Einplanen'));
-    }
-    return el('div', { class: 'kandidat' + (rang(k) === 0 ? ' passt' : '') },
+  // nur Lkw zeigen, die ohne Genehmigung passen, frei sind und einen freien Fahrer haben
+  const passende = zuSpaet ? [] : liste.filter((k) => rang(k) === 0);
+  const zeilen = passende.map((k) => {
+    const wahl = el('select', { 'aria-label': `Fahrer für ${k.lkw.kz}` }, ...k.fahrer.map((f) => el('option', { value: f.id }, `${f.name} (${f.fs})`)));
+    return el('div', { class: 'kandidat passt' },
       el('div', { class: 'kz' }, el('strong', {}, k.lkw.kz), el('small', {}, `${k.lkw.typ} · ${zahl(k.lkw.nutzlast, 1)} t`)),
-      el('div', { class: 'gruende' }, ...gruende), aktion);
+      el('div', { class: 'gruende' }, ...k.pruefung.gruende.map((x) => el('div', { class: 'g-' + x.art }, x.txt))),
+      el('div', { class: 'aktion' },
+        el('button', { class: 'knopf zweit klein', title: 'Im 3D-Ladeplan weiterplanen', onclick: () => ladeplanOeffnen(k.lkw.id, [a.geraet], a) }, '3D'),
+        wahl, el('button', { class: 'knopf klein', 'data-einplanen': k.lkw.id, onclick: () => einplanen(a, k.lkw.id, wahl.value) }, 'Einplanen')));
   });
-  $('#f-kandidaten').replaceChildren(el('h2', {}, 'Welche Lkw passen?'), ...zeilen);
+  const ausgeblendet = liste.length - passende.length;
+  $('#f-kandidaten').replaceChildren(
+    el('h2', {}, passende.length ? `Passende freie Lkw (${passende.length})` : 'Kein eigener Lkw passt und ist frei'),
+    ...zeilen,
+    ...(ausgeblendet ? [el('p', { class: 'hinweis' }, `${ausgeblendet} weitere Lkw ausgeblendet: zu klein, nur mit Genehmigung oder zu der Zeit verplant.`)] : []));
 
   const alt = interneAlternative(a);
   const hinweis = $('#f-sped-hinweis');
@@ -382,14 +479,24 @@ function renderNeu() {
 }
 
 // Tour anlegen, wenn alles passt (aus Dialog und 3D-Ladeplan). Liefert die neue ID oder null.
-function tourAnlegen(a, lkwId, fahrerId) {
+// Tour prüfen und speichern, ohne die Ansicht zu wechseln. Liefert die neue ID oder null.
+function tourSpeichern(a, lkwId, fahrerId) {
   const bis = a.start + dauerEinfach(a.art, a.ort);
   const passt = ladepruefung(finde(GERAETE, a.geraet), finde(LKW, lkwId)).ergebnis === 'ok';
   const f = finde(FAHRER, fahrerId);
-  if (!passt || !f || !darfFahren(f, finde(LKW, lkwId)) || bis > TAG_ENDE || !lkwFrei(lkwId, a.start, bis) || !fahrerFrei(fahrerId, a.start, bis)) return null;
+  const tag = a.tag || datum;
+  if (!passt || !f || !darfFahren(f, finde(LKW, lkwId)) || bis > TAG_ENDE || !istTag(tag) || tag < HEUTE
+    || !lkwFrei(lkwId, a.start, bis, [], tag) || !fahrerFrei(fahrerId, a.start, bis, [], tag)) return null;
   const id = 'T' + (++stand.nr);
-  stand.touren.push({ id, lkw: lkwId, fahrer: fahrerId, art: a.art, geraet: a.geraet, ort: a.ort, start: a.start });
-  speichern(); allesNeu();
+  stand.alleTouren.push({ id, tag, lkw: lkwId, fahrer: fahrerId, art: a.art, geraet: a.geraet, ort: a.ort, start: a.start });
+  speichern();
+  return id;
+}
+function tourAnlegen(a, lkwId, fahrerId) {
+  const id = tourSpeichern(a, lkwId, fahrerId);
+  if (!id) return null;
+  datum = a.tag || datum;            // zum geplanten Tag springen, damit man die neue Tour sieht
+  allesNeu();
   waehleTour(id);
   return id;
 }
@@ -402,7 +509,9 @@ function einplanen(a, lkwId, fahrerId) {
 function anSpedition() {
   const grund = $('#f-grund').value.trim();
   if (!grund) { $('#f-grund').focus(); $('#f-grund').placeholder = 'Bitte einen Grund angeben – ohne Grund keine Spedition.'; return; }
-  stand.sped.push({ id: 'S' + (++stand.nr), spedition: 'noch offen', grund, ...auftragAusFormular() });
+  const a = auftragAusFormular();
+  stand.alleSped.push({ id: 'S' + (++stand.nr), spedition: 'noch offen', grund, ...a });
+  datum = a.tag;
   speichern(); $('#dlg-neu').close(); allesNeu();
   waehleAnsicht('spedition');
 }
@@ -481,45 +590,77 @@ const ANNAHMEN = [
   ['schwerFaktor', 'Faktor Schwertransport'], ['arbeitstage', 'Arbeitstage/Monat'],
 ];
 function renderKosten() {
-  const intern = stand.touren.reduce((s, t) => s + kostenIntern(t), 0);
-  const kmGesamt = stand.touren.reduce((s, t) => s + kmTour(t), 0);
+  const k = stand.kosten;
+  const intern = stand.touren.reduce((x, t) => x + kostenIntern(t), 0);
+  const kmGesamt = stand.touren.reduce((x, t) => x + kmTour(t), 0);
   const leer = leerKm();
-  const sped = stand.sped.reduce((s, x) => s + kostenSpedition(x), 0);
+  const spedSumme = stand.sped.reduce((x, s) => x + kostenSpedition(s), 0);
   const alternativen = alternativenZuweisen();
-  const vermeidbar = stand.sped.map((x) => ({ x, alt: alternativen.get(x.id) })).filter((v) => v.alt)
-    .reduce((s, v) => s + kostenSpedition(v.x) - kostenAlternative(v.x, v.alt), 0);
-  const vorschlaege = kombiVorschlaege();
-  const kombiEuro = vorschlaege.reduce((s, v) => s + v.sparEuro, 0);
-  const kpi = (wert, name, art = '') => el('div', { class: 'kpi ' + art }, el('div', { class: 'wert' }, wert), el('div', { class: 'name' }, name));
-  $('#kosten-kpis').replaceChildren(
-    kpi(euro(intern), `eigene Touren heute · ${kmGesamt} km`),
-    kpi(euro(sped), `Speditionen heute · ${stand.sped.length} Aufträge`),
-    kpi(`${leer} km`, `Leerfahrten heute · ${kmGesamt ? Math.round(leer / kmGesamt * 100) : 0} % der Strecke`),
-    kpi(euro((vermeidbar + kombiEuro) * stand.kosten.arbeitstage), 'Sparpotenzial pro Monat (hochgerechnet)', 'warn'));
+  const selbst = stand.sped.map((x) => ({ x, alt: alternativen.get(x.id) })).filter((v) => v.alt)
+    .map((v) => ({ ...v, spar: kostenSpedition(v.x) - kostenAlternative(v.x, v.alt) })).filter((v) => v.spar > 0);
+  // Kombis erst prüfen, nachdem die Selbst-fahren-Vorschläge Lkw und Fahrer belegt haben (sonst doppelt gezählt)
+  const reserviert = selbst.map((v) => ({ ...v.x, id: '_kos' + v.x.id, tag: v.x.tag || datum, lkw: v.alt.lkw.id, fahrer: v.alt.fahrer[0].id }));
+  let kombis;
+  try { stand.alleTouren.push(...reserviert); kombis = kombiVorschlaege(); } finally { stand.alleTouren = stand.alleTouren.filter((t) => !reserviert.includes(t)); }
+  const sparen = selbst.reduce((x, v) => x + v.spar, 0) + kombis.reduce((x, v) => x + v.sparEuro, 0);
+  const tagText = datum === HEUTE ? 'Heute' : `Am ${tagLang(datum)}`;
 
-  $('#kombi-liste').replaceChildren(...(vorschlaege.length ? vorschlaege.slice(0, 6).map((v) => {
-    const la = finde(LKW, v.a.lkw), lb = finde(LKW, v.b.lkw);
-    return el('div', { class: 'karte' },
-      el('h3', {}, `${la.kz}: ${finde(ORTE, v.a.ort).name} + ${finde(ORTE, v.b.ort).name}`),
-      el('p', {}, `Liefert ${finde(GERAETE, v.a.geraet).kurz} nach ${finde(ORTE, v.a.ort).name} und nimmt auf dem Rückweg ${finde(GERAETE, v.b.geraet).kurz} in ${finde(ORTE, v.b.ort).name} mit.`),
-      el('p', {}, `Abholung ${hhmm(v.abholNeu)} statt ${hhmm(v.abholAlt)} · Rückkehr ${hhmm(v.bis)}${lb.id === la.id ? '' : ' · ' + lb.kz + ' wird frei'}`),
-      el('div', { class: 'befund ok' }, el('strong', {}, `spart ${v.sparKm} km · ca. ${euro(v.sparEuro)}`), ` (${v.kmVorher} → ${v.kmNachher} km)`),
-      el('div', { class: 'knopfreihe' }, el('button', { class: 'knopf klein', onclick: () => {
+  // Der Tag in einem Satz
+  $('#kosten-satz').replaceChildren(   // flache Liste: el()/replaceChildren würden verschachtelte Listen als Text ausgeben
+    `${tagText} kosten `, el('b', {}, `${stand.touren.length} eigene Touren rund ${euro(intern)}`),
+    ...(stand.sped.length ? [', dazu kommen ', el('b', {}, `${stand.sped.length} Speditionsaufträge für rund ${euro(spedSumme)}`)] : []),
+    '. ',
+    ...(sparen > 0
+      ? ['Mit den Vorschlägen unten ließen sich rund ', el('b', {}, euro(sparen)), ` sparen, hochgerechnet auf ${k.arbeitstage} Arbeitstage etwa `, el('b', {}, euro(sparen * k.arbeitstage)), ' im Monat.']
+      : ['Für diesen Tag gibt es keine Sparvorschläge.']));
+
+  // 1. Was kostet der Tag?
+  const max = Math.max(intern, spedSumme, 1);
+  const balken = (klasse, titel, betrag, unten) => el('div', { class: 'kostenbalken ' + klasse },
+    el('div', { class: 'zeile-oben' }, el('span', {}, titel), el('b', {}, euro(betrag))),
+    el('div', { class: 'spur-k' }, el('i', { style: `width:${betrag / max * 100}%` })),
+    el('small', {}, unten));
+  $('#kosten-tag').replaceChildren(
+    balken('', 'Eigene Lkw', intern, `${stand.touren.length} Touren, ${kmGesamt} km`),
+    balken('sped', 'Spedition', spedSumme, `${stand.sped.length} Aufträge`),
+    el('p', { class: 'hinweis' }, `So wird gerechnet: Eine eigene Tour kostet die gefahrenen Kilometer mal den Satz des Lkw plus die Fahrerzeit mal ${k.fahrerStunde} € je Stunde. `
+      + `Eine Spedition kostet ${k.spedGrund} € Grundpreis plus ${zahl(k.spedKm)} € je Kilometer hin und zurück, ein Schwertransport das ${zahl(k.schwerFaktor, 1)}-fache.`));
+
+  // 2. Wie viel fahren wir leer?
+  const anteil = kmGesamt ? Math.round(leer / kmGesamt * 100) : 0;
+  $('#kosten-leer').replaceChildren(
+    el('div', { class: 'kostenbalken leer' },
+      el('div', { class: 'zeile-oben' }, el('span', {}, 'Ohne Ladung gefahren'), el('b', {}, `${leer} km`)),
+      el('div', { class: 'spur-k' }, el('i', { style: `width:${anteil}%` })),
+      el('small', {}, `${anteil} % von ${kmGesamt} km`)),
+    el('p', { class: 'hinweis' }, 'Nach einer Auslieferung fährt der Lkw meist leer zurück, vor einer Abholung leer hin. '
+      + 'Das lässt sich nur verringern, wenn eine Auslieferung und eine Abholung in der Nähe zu einer Tour zusammengelegt werden. Passende Paare stehen unten.'));
+
+  // 3. Wo können wir sparen?
+  $('#sped-vorschlaege').replaceChildren(...selbst.map((v) => {
+    const o = finde(ORTE, v.x.ort), g = finde(GERAETE, v.x.geraet);
+    return el('div', { class: 'sparzeile' },
+      el('div', {}, el('strong', {}, `Spedition ${o.name} um ${hhmm(v.x.start)} selbst fahren`),
+        el('p', {}, `${v.alt.lkw.kz} ist frei und passt für ${g.kurz}, ${v.alt.fahrer[0].name} kann fahren. Spedition ${euro(kostenSpedition(v.x))}, selbst ${euro(kostenAlternative(v.x, v.alt))}.`)),
+      el('span', { class: 'betrag' }, `spart ${euro(v.spar)}`),
+      el('button', { class: 'knopf klein', 'data-selbst': v.x.id, onclick: () => {
+        const id = tourSpeichern({ art: v.x.art, geraet: v.x.geraet, ort: v.x.ort, start: v.x.start, tag: v.x.tag }, v.alt.lkw.id, v.alt.fahrer[0].id);
+        if (id) { stand.alleSped = stand.alleSped.filter((x) => x.id !== v.x.id); speichern(); }
+        allesNeu();
+      } }, 'Selbst fahren'));
+  }));
+  $('#kombi-liste').replaceChildren(...kombis.slice(0, 6).map((v) => {
+    const la = finde(LKW, v.a.lkw), oa = finde(ORTE, v.a.ort).name, ob = finde(ORTE, v.b.ort).name;
+    return el('div', { class: 'sparzeile karte-kombi' },
+      el('div', {}, el('strong', {}, `${la.kz}: ${oa} + ${ob}`),
+        el('p', {}, `Nach dem Abladen in ${oa} holt ${la.kz} das Gerät ${finde(GERAETE, v.b.geraet).kurz} in ${ob} ab, statt leer zurückzufahren. `
+          + `${v.kmVorher - v.kmNachher} km weniger, Abholung ${hhmm(v.abholNeu)} statt ${hhmm(v.abholAlt)}.`)),
+      el('span', { class: 'betrag' }, `spart ${euro(v.sparEuro)}`),
+      el('button', { class: 'knopf klein', onclick: () => {
         if (kombiUebernehmen(v.a.id, v.b.id)) { if (gewaehlt === v.b.id) gewaehlt = v.a.id; allesNeu(); } else renderKosten();
-      } }, 'Übernehmen')));
-  }) : [el('p', { class: 'hinweis' }, 'Keine sinnvollen Kombinationen gefunden.')]));
-
-  $('#sped-kosten').replaceChildren(
-    kopfzeile('Auftrag', '#Spedition', '#eigener Lkw', '#Differenz', 'Befund'),
-    ...stand.sped.map((x) => {
-      const alt = alternativen.get(x.id), preis = kostenSpedition(x);
-      return el('tr', {},
-        el('td', {}, `${hhmm(x.start)} ${x.art} ${finde(ORTE, x.ort).name} · ${finde(GERAETE, x.geraet).kurz}`),
-        el('td', { class: 'zahl' }, euro(preis)),
-        el('td', { class: 'zahl' }, alt ? euro(kostenAlternative(x, alt)) : '–'),
-        el('td', { class: 'zahl' }, alt ? euro(preis - kostenAlternative(x, alt)) : '–'),
-        el('td', {}, alt ? marke('vermeidbar', 'warn') : marke('begründet', 'frei')));
-    }));
+      } }, 'Übernehmen'));
+  }));
+  if (!selbst.length && !kombis.length) $('#sped-vorschlaege').replaceChildren(el('p', { class: 'hinweis' }, 'Keine Vorschläge: Speditionen sind begründet und es gibt keine passenden Kombi-Touren.'));
 }
 function annahmenAufbauen() {
   $('#annahmen').replaceChildren(...ANNAHMEN.map(([key, text]) => el('label', {}, text,
@@ -543,23 +684,26 @@ function ladeplanBedienungAufbauen() {
 const ANSICHTEN = ['dashboard', 'plantafel', 'hof', 'ladeplan', 'kosten', 'fuhrpark', 'spedition'];
 let ansicht = 'dashboard';
 function waehleAnsicht(name) {
+  if (abspielen && !['dashboard', 'plantafel', 'hof'].includes(name)) abspielenUmschalten();
   ansicht = name;
   $('.app').dataset.ansicht = name; // für Tablet-Layout: Tourenliste nur in der Tourenübersicht
   document.querySelectorAll('.icons button[data-ansicht]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.ansicht === name)));
   for (const v of ANSICHTEN) $('#v-' + v).hidden = v !== name;
   if (name === 'dashboard') { renderGewaehlt(); if (m3) m3.resize(); karte3dDaten(); }
-  if (name === 'plantafel') renderTafel();
+  if (name === 'plantafel') renderPlan();
   if (name === 'hof') hofAktualisieren();
   if (name === 'ladeplan') renderLadeplan();
   if (name === 'kosten') renderKosten();
   if (name === 'fuhrpark') renderFuhrpark();
 }
 function allesNeu() {
+  $('#datum-eingabe').value = datum;   // Datumsfeld immer mit dem gewählten Tag abgleichen
+  $('.app').dataset.heute = datum === HEUTE ? 'ja' : 'nein';
   if (!finde(stand.touren, gewaehlt)) gewaehlt = standardTour();
   renderKpis(); renderListe(); renderSpedition();
   if (ansicht === 'dashboard') { renderGewaehlt(); karte3dDaten(); }
   routenHolen();
-  if (ansicht === 'plantafel') renderTafel();
+  if (ansicht === 'plantafel') renderPlan();
   if (ansicht === 'hof') hofAktualisieren();
   if (ansicht === 'kosten') renderKosten();
   if (ansicht === 'fuhrpark') renderFuhrpark();
@@ -568,13 +712,19 @@ function allesNeu() {
 // ---------- Start ----------
 stand = laden();
 gewaehlt = standardTour();
-document.querySelectorAll('[data-icon]').forEach((b) => { b.append(icon(b.dataset.icon)); if (b.dataset.label) b.append(el('span', {}, b.dataset.label)); });
+document.querySelectorAll('[data-icon]').forEach((b) => { b.prepend(icon(b.dataset.icon)); if (b.dataset.label) b.append(el('span', {}, b.dataset.label)); });
 $('#f-geraet').replaceChildren(...GERAETE.map((g) => el('option', { value: g.id }, g.name)));
 $('#f-ort').replaceChildren(...ORTE.map((o) => el('option', { value: o.id }, `${o.name} (${o.km} km)`)));
 $('#f-geraet').value = 'G06';
 $('#f-ort').value = 'ha';
-['#f-art', '#f-geraet', '#f-ort', '#f-start'].forEach((sel) => $(sel).addEventListener('change', renderNeu));
-$('#neu-knopf').addEventListener('click', () => { $('#f-grund').value = ''; renderNeu(); $('#dlg-neu').showModal(); });
+['#f-art', '#f-geraet', '#f-ort', '#f-start', '#f-tag'].forEach((sel) => $(sel).addEventListener('change', renderNeu));
+$('#neu-knopf').addEventListener('click', () => {
+  $('#f-grund').value = '';
+  $('#f-tag').min = HEUTE;
+  $('#f-tag').value = datum >= HEUTE ? datum : HEUTE;
+  renderNeu();
+  $('#dlg-neu').showModal();
+});
 $('#f-sped-knopf').addEventListener('click', anSpedition);
 document.querySelectorAll('[data-schliessen]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close()));
 document.querySelectorAll('.icons button[data-ansicht]').forEach((b) => b.addEventListener('click', () => waehleAnsicht(b.dataset.ansicht)));
@@ -582,7 +732,14 @@ $('#suche').addEventListener('input', renderListe);
 $('#reset-knopf').addEventListener('click', () => { stand = neuerStand(); speichern(); gewaehlt = standardTour(); annahmenAufbauen(); allesNeu(); fokusTour(gewaehlt); });
 $('#zeit-regler').addEventListener('input', (e) => setzeZeit(Number(e.target.value)));
 $('#zeit-play').addEventListener('click', abspielenUmschalten);
-$('#zeit-jetzt').addEventListener('click', () => setzeZeit(DEMO_JETZT));
+$('#zeit-jetzt').addEventListener('click', () => { if (datum !== HEUTE) datumSetzen(HEUTE); setzeZeit(DEMO_JETZT); });
+$('#datum-eingabe').value = datum;
+$('#datum-eingabe').addEventListener('change', (e) => datumSetzen(e.target.value));
+$('#tag-zurueck').addEventListener('click', () => datumSetzen(tagPlus(datum, -1)));
+$('#tag-vor').addEventListener('click', () => datumSetzen(tagPlus(datum, 1)));
+$('#tag-heute').addEventListener('click', () => datumSetzen(HEUTE));
+document.querySelectorAll('.plan-reiter button').forEach((b) => b.addEventListener('click', () => planReiter(b.dataset.plan)));
+$('.app').dataset.plan = 'tag';
 $('#k-alle').addEventListener('click', () => {
   // umschalten: alle Touren zeigen oder zurück zur gewählten Tour
   if (kartenModus === 'alle') { setzeKartenModus('einzeln'); fokusTour(gewaehlt); } else { setzeKartenModus('alle'); fokusAlle(); }
