@@ -439,6 +439,17 @@ function feldMinuten(sel) {
   return v;
 }
 const startMinuten = () => feldMinuten('#f-start');
+// Abfahrt als Auswahl 06:00–17:00 im Viertelstundentakt statt Eintippen (Safari/Windows)
+function zeitAuswahlAufbauen(sel, extra) {
+  const zeiten = [];
+  for (let m = TAG_START; m <= 17 * 60; m += 15) zeiten.push(m);
+  if (extra != null && !zeiten.includes(extra)) zeiten.push(extra); // vorhandene Zeit wie 07:20 nicht verfälschen
+  $(sel).replaceChildren(...zeiten.sort((a, b) => a - b).map((m) => el('option', { value: hhmm(m) }, hhmm(m))));
+}
+function zeitSetzen(sel, m) {
+  zeitAuswahlAufbauen(sel, m);
+  $(sel).value = hhmm(m);
+}
 
 const feldTag = (sel) => { const v = $(sel).value; const tag = istTag(v) && v >= HEUTE ? v : (datum >= HEUTE ? datum : HEUTE); $(sel).value = tag; return tag; };
 const auftragAusFormular = () => ({ art: $('#f-art').value, geraet: $('#f-geraet').value, ort: $('#f-ort').value, start: startMinuten(), tag: feldTag('#f-tag') });
@@ -735,7 +746,7 @@ function anfrageAnSpedition(a) {
 }
 function anfrageAndersPlanen(a) {
   $('#f-art').value = a.art; $('#f-geraet').value = a.geraet; $('#f-ort').value = a.ort;
-  $('#f-start').value = hhmm(a.start); $('#f-tag').min = HEUTE; $('#f-tag').value = a.tag;
+  zeitSetzen('#f-start', a.start); $('#f-tag').min = HEUTE; $('#f-tag').value = a.tag;
   $('#f-grund').value = '';
   anfrageImDialog = a.id;
   renderNeu();
@@ -872,6 +883,8 @@ $('#k-3d').addEventListener('click', (e) => {
   umschalten3d(an);
 });
 uhrzeitenAufbauen();
+zeitAuswahlAufbauen('#f-start'); zeitAuswahlAufbauen('#lp-start');
+$('#f-start').value = '13:00';
 annahmenAufbauen();
 ladeplanBedienungAufbauen();
 lpPlanungAufbauen();

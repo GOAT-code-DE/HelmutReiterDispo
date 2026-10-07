@@ -153,7 +153,7 @@ function lpAuftrag() {
 function renderLpPlanung() {
   $('#lp-art').value = lp.auftrag.art;
   $('#lp-ort').value = lp.auftrag.ort;
-  $('#lp-start').value = hhmm(lp.auftrag.start);
+  zeitSetzen('#lp-start', lp.auftrag.start);
   const l = finde(LKW, lp.lkw), a = lpAuftrag();
   $('#lp-tag').min = HEUTE;
   $('#lp-tag').value = a.tag;
