@@ -153,6 +153,9 @@
   .uhrzeiten button:hover { border-color: var(--gruen); color: var(--gruen-dunkel); }
   .uhrzeiten button[aria-current="true"] { background: var(--gruen); border-color: var(--gruen); color: #fff; font-weight: 700; }
   .zeitleiste output { font-size: 17px; font-weight: 700; min-width: 82px; font-variant-numeric: tabular-nums; }
+  /* Uhrzeit mit dem Finger seitlich ziehen */
+  #zeit-anzeige { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; padding: 0 12px; border: 1px solid var(--linie); border-radius: 10px; background: var(--schiefer-hell); cursor: ew-resize; touch-action: none; user-select: none; -webkit-user-select: none; }
+  #zeit-anzeige.zieht { border-color: var(--gruen); background: #fff; color: var(--gruen-dunkel); }
 
   .ansicht { flex: 1; min-height: 0; }
   .dashboard { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; min-height: 0; }
@@ -363,18 +366,21 @@
   dl.daten { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 13px; }
   dl.daten dt { color: var(--leise); }
   dl.daten dd { margin: 0; }
-  .formular { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 14px; }
-  .formular label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--leise); }
-  .formular select, .formular input { padding: 8px; border: 1px solid var(--linie); border-radius: 10px; color: var(--text); background: #fff; }
+  /* zwei volle Zeilen: Art + Gerät, dann Ort + Datum + Abfahrt */
+  .formular { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .formular label { grid-column: span 2; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--leise); min-width: 0; }
+  .formular label:nth-child(2) { grid-column: span 4; }
+  .formular select, .formular input { box-sizing: border-box; width: 100%; height: 44px; margin: 0; padding: 0 10px; border: 1px solid var(--linie); border-radius: 10px; color: var(--text); background: #fff; }
+  .formular input::-webkit-date-and-time-value { text-align: left; } /* iPad zentriert Datum/Uhrzeit sonst */
   .geraet-info { background: var(--schiefer-hell); border-radius: 10px; padding: 8px 12px; font-size: 13px; margin-bottom: 12px; }
-  .kandidat { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 9px 10px; border-bottom: 1px solid var(--linie); }
-  .kandidat .kz { width: 190px; flex: none; }
+  .kandidat { display: grid; grid-template-columns: 180px minmax(0, 1fr) auto; align-items: center; gap: 6px 12px; padding: 9px 10px; border-bottom: 1px solid var(--linie); }
   .kandidat .kz strong { display: block; font-size: 13px; }
   .kandidat .kz small { color: var(--leise); font-size: 11px; }
-  .kandidat .gruende { flex: 1 1 220px; font-size: 12px; }
+  .kandidat .gruende { font-size: 12px; }
   .kandidat .gruende div { margin: 1px 0; }
-  .kandidat .aktion { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .kandidat .aktion { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; justify-content: flex-end; }
   .kandidat .aktion select { padding: 6px; border: 1px solid var(--linie); border-radius: 8px; }
+  .kandidat .aktion > * { min-height: 36px; }
   .kandidat.passt { background: #f6fbf7; }
   .g-nein { color: var(--rot); }
   .g-genehmigung { color: var(--warn); }
@@ -419,7 +425,10 @@
     .lp-raster { grid-template-columns: 1fr; }
     #lp-szene { height: 340px; }
     .zeile { grid-template-columns: 150px 1fr; }
-    .kandidat .kz { width: 100%; }
+    .kandidat { grid-template-columns: minmax(0, 1fr); }
+    .kandidat .aktion { justify-content: flex-start; flex-wrap: wrap; }
+    .formular { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .formular label, .formular label:nth-child(2) { grid-column: span 1; }
   }
 </style>
 </head>
@@ -460,7 +469,7 @@
         <div class="uhrzeiten" id="uhrzeiten" role="group" aria-label="Zur Uhrzeit springen"></div>
         <input type="range" id="zeit-regler" min="360" max="1140" step="5" aria-label="Uhrzeit">
       </div>
-      <output id="zeit-anzeige"></output>
+      <output id="zeit-anzeige" title="Drücken und seitlich ziehen, um die Uhrzeit zu ändern"></output>
       <button class="knopf zweit klein" id="zeit-jetzt">Jetzt</button>
     </div>
     <button class="knopf" id="neu-knopf">+ Neuer Transport</button>

@@ -835,6 +835,23 @@ document.querySelectorAll('.icons button[data-ansicht]').forEach((b) => b.addEve
 $('#suche').addEventListener('input', renderListe);
 $('#reset-knopf').addEventListener('click', () => { stand = neuerStand(); lp.anfrage = null; speichern(); gewaehlt = standardTour(); annahmenAufbauen(); allesNeu(); fokusTour(gewaehlt); });
 $('#zeit-regler').addEventListener('input', (e) => setzeZeit(Number(e.target.value)));
+// Uhrzeit-Anzeige ziehen: 1 px seitlich = 2 Minuten, auf 5 Minuten gerundet
+let ziehStart = null;
+$('#zeit-anzeige').addEventListener('pointerdown', (e) => {
+  if (abspielen) abspielenUmschalten(); // sonst läuft die Uhr unter dem Finger weiter
+  ziehStart = { x: e.clientX, zeit };
+  e.currentTarget.setPointerCapture(e.pointerId);
+  e.currentTarget.classList.add('zieht');
+});
+$('#zeit-anzeige').addEventListener('pointermove', (e) => {
+  if (!ziehStart) return;
+  const m = Math.max(TAG_START, Math.min(TAG_ENDE, Math.round((ziehStart.zeit + (e.clientX - ziehStart.x) * 2) / 5) * 5));
+  if (m !== zeit) setzeZeit(m);
+});
+['pointerup', 'pointercancel'].forEach((t) => $('#zeit-anzeige').addEventListener(t, (e) => {
+  ziehStart = null;
+  e.currentTarget.classList.remove('zieht');
+}));
 $('#zeit-play').addEventListener('click', abspielenUmschalten);
 $('#zeit-jetzt').addEventListener('click', () => { if (datum !== HEUTE) datumSetzen(HEUTE); setzeZeit(DEMO_JETZT); });
 $('#datum-eingabe').value = datum;
