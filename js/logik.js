@@ -1,10 +1,11 @@
 'use strict';
-// Rechenlogik: Zeiten, Ladeprüfung, Verfügbarkeit, Kombi-Touren, Kosten. Kein DOM.
+// Rechenlogik: Speicher, Zeiten, Verfügbarkeit, Pausen und Lenkzeiten, Ladeprüfung, Kosten. Kein DOM.
+// Die Beladungslogik und die Tagesplanung mit Sammeltouren stehen in beladung.js.
 
-const SPEICHER = 'reiter-dispo-demo-v3';
-let stand;            // { alleTouren, alleSped, alleAnfragen, nr, kosten } + Tagessicht touren/sped
+const SPEICHER = 'reiter-dispo-demo-v4';
+let stand;            // { alleTouren, alleSped, alleAuftraege, vertraege, kunden, werkstatt, nr, kosten } + Tagessicht touren/sped
 let datum = HEUTE;    // gewählter Tag
-let zeit = DEMO_JETZT; // aktuelle (abgespielte) Uhrzeit in Minuten
+const zeit = DEMO_JETZT; // Uhrzeit der Demo in Minuten
 
 const finde = (liste, id) => liste.find((x) => x.id === id);
 const zahl = (n, d = 2) => n.toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -12,6 +13,7 @@ const euro = (n) => Math.round(n).toLocaleString('de-DE') + ' €';
 const hhmm = (m) => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(Math.round(m) % 60).padStart(2, '0');
 const ueberlappt = (a1, a2, b1, b2) => a1 < b2 && b1 < a2;
 const fahrMinKm = (km) => Math.round(km / KMH * 60);
+const ladetag = () => tagPlus(HEUTE, LADETAG_NR);
 
 // ---------- Speicher ----------
 // stand.touren und stand.sped zeigen nur den gewählten Tag; gespeichert wird alles in alleTouren/alleSped
@@ -30,11 +32,16 @@ function neuerStand() {
   return tagesSicht({
     alleTouren: [...structuredClone(SEED_TOUREN).map((t) => ({ ...t, tag: HEUTE })), ...b.touren],
     alleSped: [...structuredClone(SEED_SPED).map((x) => ({ ...x, tag: HEUTE })), ...b.sped],
-    alleAnfragen: beispielAnfragen(),
+    alleAuftraege: [...SEED_LADETAG.map(({ tagNr, ...a }) => ({ ...a, tag: tagPlus(HEUTE, tagNr ?? LADETAG_NR) })),
+      // Abholungen der erzeugten Verträge, die in den nächsten drei Wochen enden
+      ...VERTRAEGE_ERZEUGT.filter((v) => v.abholen && v.bis <= 21).map((v, i) => ({ id: 'B' + (300 + i), tag: tagPlus(HEUTE, v.bis), art: 'Abholung',
+        vertrag: v.id, geraet: v.geraet, ort: v.kunde, ab: 8 * 60, bis: 16 * 60 }))],
+    vertraege: [...SEED_VERTRAEGE, ...VERTRAEGE_ERZEUGT].map((v) => ({ ...v, von: tagPlus(HEUTE, v.von), bis: tagPlus(HEUTE, v.bis) })),
+    kunden: [],    // neu angelegte Kunden; die Beispielkunden stehen in KUNDEN
+    werkstatt: [], // [{ lkw, tag }]: Lkw fällt an diesem Tag aus
     nr: b.nr, kosten: { ...KOSTEN_START },
   });
 }
-const beispielAnfragen = () => SEED_ANFRAGEN.map(({ tagNr, ...a }) => ({ ...a, tag: tagPlus(HEUTE, tagNr) }));
 // Beispieltouren von einer Woche zurück bis drei Wochen voraus, nah voller, fern lichter (fester Zufall)
 function beispielTage() {
   let saat = 20261006;
@@ -53,44 +60,75 @@ function beispielTage() {
       for (let k = 0; k < 2; k++) {
         const g = wahl(GERAETE.filter((x) => ladepruefung(x, l).ergebnis === 'ok'));
         if (!g) break;
-        const ort = wahl(ORTE), art = zufall() < 0.55 ? 'Auslieferung' : 'Abholung';
+        const ort = wahl(STAEDTE), art = zufall() < 0.55 ? 'Auslieferung' : 'Abholung';
         const bis = start + dauerEinfach(art, ort.id);
         if (bis > 17 * 60) break;
-        const f = FAHRER.filter((x) => !x.abwesend && darfFahren(x, l) && !(fahrerBelegt[x.id] || []).some(([a, b]) => ueberlappt(start, bis, a, b)))
+        const neu = abschnitteVon({ art, geraet: g.id, ort: ort.id, start, lkw: l.id });
+        const f = FAHRER.filter((x) => !x.abwesend && darfFahren(x, l) && !pausenVerstoss([...(fahrerBelegt[x.id] || []), ...neu]))
           .sort((a, b) => FS_RANG[a.fs] - FS_RANG[b.fs])[0];
         if (!f) break;
-        (fahrerBelegt[f.id] = fahrerBelegt[f.id] || []).push([start, bis]);
+        (fahrerBelegt[f.id] = fahrerBelegt[f.id] || []).push(...neu);
         touren.push({ id: 'T' + nr++, tag, lkw: l.id, fahrer: f.id, geraet: g.id, ort: ort.id, art, start });
         start = Math.ceil((bis + 30) / 15) * 15 + Math.floor(zufall() * 4) * 15; // nächste volle Viertelstunde
         if (zufall() < 0.5) break;
       }
     }
     if (zufall() < 0.5) {
-      sped.push({ id: 'S' + nr++, tag, geraet: wahl(GERAETE).id, ort: wahl(ORTE).id, art: zufall() < 0.5 ? 'Auslieferung' : 'Abholung',
-        start: 8 * 60 + Math.floor(zufall() * 16) * 15, spedition: wahl(['Spedition Nord', 'Schwerlast West']),
-        grund: wahl(['kein Lkw frei', 'kein Fahrer verfügbar', 'Überbreite, Schwertransport mit Genehmigung']) });
+      const g = wahl(GERAETE), ort = wahl(STAEDTE).id, art = zufall() < 0.5 ? 'Auslieferung' : 'Abholung';
+      const start = 8 * 60 + Math.floor(zufall() * 16) * 15, spedition = wahl(['Spedition Nord', 'Schwerlast West']);
+      const grund = wahl(['kein Lkw frei', 'kein Fahrer verfügbar']); // gleich oft würfeln wie bisher, damit die übrigen Tage gleich bleiben
+      const eigen = LKW.some((l) => ladepruefung(g, l).ergebnis === 'ok'); // Schwertransport nur, wenn kein eigener Lkw das Gerät laden darf
+      sped.push({ id: 'S' + nr++, tag, geraet: g.id, ort, art, start, spedition, grund: eigen ? grund : 'Schwertransport mit Genehmigung' });
     }
   }
-  return { touren, sped, nr };
+  // Erst nach dem Würfeln filtern, damit die übrigen Tage gleich bleiben
+  return { touren: [...touren.filter((t) => t.tag !== ladetag() || LADETAG_BELEGT.includes(t.lkw)),
+    ...LADETAG_TOUREN.map((t) => ({ ...t, tag: ladetag() }))], sped, nr };
 }
 function laden() {
   try {
     const s = JSON.parse(localStorage.getItem(SPEICHER));
     const zeitOk = (x) => Number.isInteger(x.start) && x.start >= TAG_START && x.start <= 17 * 60;
-    const auftragOk = (x) => x && typeof x.id === 'string' && /^[TS]\d{1,6}$/.test(x.id) && finde(GERAETE, x.geraet) && finde(ORTE, x.ort) && zeitOk(x)
-      && (x.art === 'Auslieferung' || x.art === 'Abholung');
-    const kombiOk = (t) => !t.kombi || (finde(GERAETE, t.kombi.geraet) && finde(ORTE, t.kombi.ort) && t.art === 'Auslieferung');
+    const id = (x, muster) => typeof x.id === 'string' && muster.test(x.id);
+    const text = (x, max) => typeof x === 'string' && x.length <= max;
+    const KUNDE_FELDER = ['id', 'firma', 'strasse', 'plz', 'stadt', 'ansprechpartner', 'telefon', 'lat', 'lng'];
+    const kundeOk = (k) => k && id(k, /^K\d{2,6}$/) && Object.keys(k).length === KUNDE_FELDER.length && KUNDE_FELDER.every((f) => f in k)
+      && text(k.firma, 80) && k.firma.trim() && text(k.strasse, 80) && /^\d{5}$/.test(k.plz) && text(k.stadt, 60) && text(k.ansprechpartner, 60) && text(k.telefon, 40)
+      && Number.isFinite(k.lat) && Number.isFinite(k.lng) && k.lat > 47 && k.lat < 55.5 && k.lng > 5.5 && k.lng < 15.5;
+    if (!s || !Array.isArray(s.kunden) || !s.kunden.every(kundeOk)) throw new Error('Kunden ungültig');
+    kundenEintragen(s.kunden); // erst danach kennt finde(ORTE, …) die neuen Kunden
+    const vertragOk = (v) => v && id(v, /^M\d{2,6}$/) && /^K/.test(v.kunde) && finde(ORTE, v.kunde) && finde(GERAETE, v.geraet)
+      && istTag(v.von) && istTag(v.bis) && v.von <= v.bis && typeof v.abholen === 'boolean' && Object.keys(v).length === 6;
+    const auftragOk = (a) => a && id(a, /^B\d{1,6}$/) && finde(GERAETE, a.geraet) && finde(ORTE, a.ort) && istTag(a.tag) && !istSonntag(a.tag)
+      && Number.isInteger(a.bis) && a.bis >= TAG_START && a.bis <= TAG_ENDE
+      && (a.art === 'Auslieferung' ? !('ab' in a) : a.art === 'Abholung' && Number.isInteger(a.ab) && a.ab >= TAG_START && a.ab <= a.bis)
+      && (!('vertrag' in a) || typeof a.vertrag === 'string');
+    const einzelOk = (t) => (t.art === 'Auslieferung' || t.art === 'Abholung') && finde(GERAETE, t.geraet) && finde(ORTE, t.ort)
+      && !('stopps' in t) && !('auftraege' in t);
+    const paare = (liste) => liste.map(([o, g]) => o + '|' + g).sort().join();
+    const sammelOk = (t) => Array.isArray(t.stopps) && t.stopps.length >= 1 && t.stopps.length <= MAX_JE_TOUR
+      && t.stopps.every((h) => h && finde(ORTE, h.ort) && (h.art === 'Auslieferung' || h.art === 'Abholung')
+        && Array.isArray(h.geraete) && h.geraete.length && h.geraete.every((g) => finde(GERAETE, g)))
+      && t.stopps.every((h, i) => i === 0 || h.art === 'Abholung' || t.stopps[i - 1].art === 'Auslieferung') // erst ausliefern, dann abholen
+      && Array.isArray(t.auftraege) && t.auftraege.every(auftragOk) && t.auftraege.every((a) => a.tag === t.tag)
+      // jedes Gerät in den Stopps hat genau einen Auftrag, sonst gingen beim Stornieren Aufträge verloren
+      && paare(t.stopps.flatMap((h) => h.geraete.map((g) => [h.ort + h.art, g]))) === paare(t.auftraege.map((a) => [a.ort + a.art, a.geraet]))
+      && fahrplan(t.stopps.map(({ ort, art }) => ({ ort, art })), t.auftraege, t.start, finde(LKW, t.lkw).fs !== 'B', false) !== null; // Tour geht zeitlich auf
+    const tourOk = (t) => t && id(t, /^T\d{1,6}$/) && istTag(t.tag) && zeitOk(t) && finde(LKW, t.lkw) && finde(FAHRER, t.fahrer)
+      && (t.art === 'Sammeltour' ? sammelOk(t) : einzelOk(t));
+    const spedOk = (x) => x && id(x, /^S\d{1,6}$/) && istTag(x.tag) && zeitOk(x) && einzelOk(x) && typeof x.grund === 'string' && (!('vertrag' in x) || typeof x.vertrag === 'string');
     const kostenOk = (k) => k && Object.keys(KOSTEN_START).every((n) => Number.isFinite(k[n]) && k[n] >= 0);
-    if (s && Array.isArray(s.alleTouren) && Array.isArray(s.alleSped) && Number.isSafeInteger(s.nr) && s.nr >= 0 && s.nr < 1e6 && kostenOk(s.kosten)
-      && s.alleTouren.every((t) => auftragOk(t) && istTag(t.tag) && kombiOk(t) && finde(LKW, t.lkw) && finde(FAHRER, t.fahrer))
-      && s.alleSped.every((x) => auftragOk(x) && istTag(x.tag) && !('kombi' in x) && typeof x.grund === 'string')) {
-      if (!('alleAnfragen' in s)) s.alleAnfragen = beispielAnfragen(); // Stand von vor dem Anfrage-Cockpit
-      const anfrageOk = (x) => auftragOk({ ...x, id: String(x?.id).replace(/^A/, 'T') }) && /^A\d{1,6}$/.test(x.id) && istTag(x.tag) && !istSonntag(x.tag) && QUELLEN.includes(x.quelle) && !('kombi' in x);
-      if (!Array.isArray(s.alleAnfragen) || !s.alleAnfragen.every(anfrageOk)) throw new Error('Anfragen ungültig');
-      const ids = [...s.alleTouren, ...s.alleSped, ...s.alleAnfragen].map((x) => x.id);
+    if (s && !('werkstatt' in s)) s.werkstatt = [];
+    const werkstattOk = (w) => w && finde(LKW, w.lkw) && istTag(w.tag) && Object.keys(w).length === 2;
+    if (Array.isArray(s.alleTouren) && Array.isArray(s.alleSped) && Array.isArray(s.alleAuftraege) && Array.isArray(s.vertraege) && s.vertraege.every(vertragOk)
+      && Number.isSafeInteger(s.nr) && s.nr >= 0 && s.nr < 1e6 && kostenOk(s.kosten)
+      && s.alleTouren.every(tourOk) && s.alleSped.every(spedOk) && s.alleAuftraege.every(auftragOk)
+      && Array.isArray(s.werkstatt) && s.werkstatt.every(werkstattOk)) {
+      // Aufträge sind entweder offen oder stecken in einer Sammeltour; jede ID nur einmal
+      const ids = [...s.alleTouren, ...s.alleSped, ...s.alleAuftraege, ...s.alleTouren.flatMap((t) => t.auftraege || []), ...s.vertraege, ...s.kunden].map((x) => x.id);
       if (new Set(ids).size !== ids.length) throw new Error('doppelte IDs');
       // Zähler hinter die höchste vorhandene Nummer setzen, damit neue IDs nie kollidieren
-      s.nr = Math.max(s.nr, ...ids.map((id) => Number(id.slice(1)) || 0));
+      s.nr = Math.max(s.nr, ...ids.map((x) => Number(x.slice(1)) || 0));
       return tagesSicht(s);
     }
   } catch (e) { /* kein oder kaputter Speicher: Beispieldaten */ }
@@ -100,6 +138,19 @@ function speichern() {
   try { localStorage.setItem(SPEICHER, JSON.stringify(stand)); } catch (e) { /* Demo läuft auch ohne */ }
 }
 
+// ---------- Kunden ----------
+// Kunden sind Orte der Planung: Name „Firma (Stadt)“, kurz die Stadt, Entfernung zum Hof per Luftlinie × Straßenfaktor
+// stand.kunden enthält neue Kunden und bearbeitete Beispielkunden (gleiche ID); diese überschreiben den Eintrag.
+function kundenEintragen(liste) {
+  for (const k of liste) {
+    const ort = { id: k.id, name: `${k.firma} (${k.stadt})`, kurz: k.stadt, km: kmZwischen(HOF, k), lat: k.lat, lng: k.lng };
+    const alt = finde(ORTE, k.id);
+    if (alt) Object.assign(alt, ort); else ORTE.push(ort);
+  }
+}
+const kundeVon = (id) => finde(stand.kunden, id) || finde(KUNDEN, id);
+const alleKunden = () => [...KUNDEN.map((k) => finde(stand.kunden, k.id) || k), ...stand.kunden.filter((k) => !finde(KUNDEN, k.id))];
+
 // ---------- Strecken ----------
 function kmZwischen(a, b) { // Luftlinie × Straßenfaktor
   const r = Math.PI / 180, R = 6371;
@@ -107,9 +158,10 @@ function kmZwischen(a, b) { // Luftlinie × Straßenfaktor
   return Math.round(R * d * STRASSENFAKTOR);
 }
 
-// Eine Tour als Folge von Abschnitten: laden (am Hof oder beim Kunden) und fahrt.
-// wo/von/nach: 'hof' oder Orts-ID; ladung: Geräte-ID auf der Ladefläche oder null
+// Eine Tour als Folge von Abschnitten: laden (am Hof oder beim Kunden), fahrt und (Sammeltour) pause.
+// wo/von_ort/nach: 'hof' oder Orts-ID; ladung: Geräte-IDs auf der Ladefläche
 function phasen(t) {
+  if (t.stopps) return fahrplan(t.stopps.map(({ ort, art }) => ({ ort, art })), t.auftraege, t.start, finde(LKW, t.lkw).fs !== 'B', false)?.phasen || [];
   const p = [];
   let z = t.start;
   const laden_ = (wo, ladung, text) => { p.push({ typ: 'laden', wo, ladung, text, von: z, bis: z + LADEN_MIN }); z += LADEN_MIN; };
@@ -120,26 +172,19 @@ function phasen(t) {
     z += dauer;
   };
   if (t.art === 'Auslieferung') {
-    laden_('hof', t.geraet, 'Beladen');
-    fahrt('hof', t.ort, t.geraet);
-    laden_(t.ort, t.geraet, 'Abladen beim Kunden');
-    if (t.kombi) {
-      fahrt(t.ort, t.kombi.ort, null);
-      laden_(t.kombi.ort, t.kombi.geraet, 'Aufladen beim Kunden');
-      fahrt(t.kombi.ort, 'hof', t.kombi.geraet);
-      laden_('hof', t.kombi.geraet, 'Abladen am Hof');
-    } else {
-      fahrt(t.ort, 'hof', null);
-    }
+    laden_('hof', [t.geraet], 'Beladen');
+    fahrt('hof', t.ort, [t.geraet]);
+    laden_(t.ort, [t.geraet], 'Abladen beim Kunden');
+    fahrt(t.ort, 'hof', []);
   } else {
-    fahrt('hof', t.ort, null);
-    laden_(t.ort, t.geraet, 'Aufladen beim Kunden');
-    fahrt(t.ort, 'hof', t.geraet);
-    laden_('hof', t.geraet, 'Abladen am Hof');
+    fahrt('hof', t.ort, []);
+    laden_(t.ort, [t.geraet], 'Aufladen beim Kunden');
+    fahrt(t.ort, 'hof', [t.geraet]);
+    laden_('hof', [t.geraet], 'Abladen am Hof');
   }
   return p;
 }
-const ende = (t) => { const p = phasen(t); return p[p.length - 1].bis; };
+const ende = (t) => { const p = phasen(t); return p.length ? p[p.length - 1].bis : t.start; };
 const kmTour = (t) => phasen(t).filter((x) => x.typ === 'fahrt').reduce((s, x) => s + x.km, 0);
 const dauerEinfach = (art, ortId) => ende({ art, ort: ortId, geraet: GERAETE[0].id, start: 0 });
 function status(t, z = zeit) {
@@ -148,190 +193,85 @@ function status(t, z = zeit) {
   if (ende(t) <= z) return 'erledigt';
   return t.start <= z ? 'unterwegs' : 'geplant';
 }
-const phaseUm = (t, z = zeit) => (t.tag && t.tag !== HEUTE ? null : phasen(t).find((x) => x.von <= z && z < x.bis) || null);
-const zielText = (t) => finde(ORTE, t.ort).name + (t.kombi ? ' + ' + finde(ORTE, t.kombi.ort).name : '');
+const ortKurz = (id) => { const o = finde(ORTE, id); return o.kurz || o.name; };
+const zielText = (t) => (t.stopps ? t.stopps.map((h) => ortKurz(h.ort)).join(' → ') : ortKurz(t.ort));
+const tourGeraete = (t) => (t.stopps ? t.stopps.flatMap((h) => h.geraete) : [t.geraet]).map((id) => finde(GERAETE, id));
 
 // ---------- Verfügbarkeit ----------
+const inWerkstatt = (lkwId, tag = datum) => stand.werkstatt.some((w) => w.lkw === lkwId && w.tag === tag);
 function lkwFrei(lkwId, von, bis, ohne = [], tag = datum) {
+  if (inWerkstatt(lkwId, tag)) return false;
   return !stand.alleTouren.some((t) => t.tag === tag && t.lkw === lkwId && !ohne.includes(t.id) && ueberlappt(von, bis, t.start, ende(t)));
 }
-function fahrerFrei(fahrerId, von, bis, ohne = [], tag = datum) {
+// neu: Abschnitte der geplanten Tour; dann zählen auch Pausen und Lenkzeiten über den ganzen Tag des Fahrers
+function fahrerFrei(fahrerId, von, bis, ohne = [], tag = datum, neu = null) {
   if (finde(FAHRER, fahrerId).abwesend && tag === HEUTE) return false; // heute krank
-  return !stand.alleTouren.some((t) => t.tag === tag && t.fahrer === fahrerId && !ohne.includes(t.id) && ueberlappt(von, bis, t.start, ende(t)));
+  const tagesTouren = stand.alleTouren.filter((t) => t.tag === tag && t.fahrer === fahrerId && !ohne.includes(t.id));
+  if (tagesTouren.some((t) => ueberlappt(von, bis, t.start, ende(t)))) return false;
+  return !neu || !pausenVerstoss([...tagesTouren.flatMap(abschnitteVon), ...neu]);
+}
+
+// ---------- Pausen und Lenkzeiten ----------
+// Arbeitszeitgesetz §§ 3, 4: höchstens 10 h Arbeit am Tag, nie mehr als 6 h am Stück; Pausen insgesamt 30 min ab 6 h,
+// 45 min ab 9 h, in Abschnitten von mindestens 15 min. EU-Verordnung 561/2006 für Lkw über 3,5 t: nach 4,5 h Lenkzeit
+// 45 min Unterbrechung (auch 15 + 30 min). Planungsregel: höchstens 9 h Lenkzeit am Tag (10 h wären nur zweimal pro Woche
+// erlaubt, das wird hier nicht genutzt). Fahrten mit Fahrzeugen bis 3,5 t zählen nicht als EU-Lenkzeit, nur als Arbeitszeit.
+// Lücken entstehen im Modell nur zwischen zwei Touren am Hof oder als eingeplante Pause, nie als Warten beim Kunden;
+// ab 15 min gelten sie als Pause, kürzere als Arbeitszeit.
+const PAUSE = 45;
+const abschnitteVon = (t) => {
+  const eu = finde(LKW, t.lkw).fs !== 'B';
+  return phasen(t).filter((p) => p.typ !== 'pause').map((p) => ({ von: p.von, bis: p.bis, lenk: p.typ === 'fahrt', eu }));
+};
+// abschnitte eines Fahrers an einem Tag: [{ von, bis, lenk, eu }]; liefert den ersten Verstoß als Text oder null
+function pausenVerstoss(abschnitte) {
+  let arbeit = 0, lenk = 0, block = 0, lenkBlock = 0, pausen = 0, teilpause = false, bisher = null;
+  for (const s of [...abschnitte].sort((a, b) => a.von - b.von)) {
+    if (bisher !== null) {
+      const luecke = s.von - bisher;
+      if (luecke < 0) return 'zwei Einsätze zur selben Zeit';
+      if (luecke >= 15) {
+        pausen += luecke; block = 0;
+        if (luecke >= PAUSE || (teilpause && luecke >= 30)) { lenkBlock = 0; teilpause = false; } else teilpause = true;
+      } else { arbeit += luecke; block += luecke; }
+    }
+    const d = s.bis - s.von;
+    arbeit += d; block += d;
+    if (s.lenk && s.eu) { lenk += d; lenkBlock += d; }
+    if (block > 6 * 60) return 'mehr als 6 Stunden Arbeit ohne Pause';
+    if (lenkBlock > 4.5 * 60) return 'mehr als 4,5 Stunden Lenkzeit ohne 45 Minuten Pause';
+    bisher = s.bis;
+  }
+  if (arbeit > 10 * 60) return `${zahl(arbeit / 60, 1)} Stunden Arbeitszeit, erlaubt sind 10`;
+  if (lenk > 9 * 60) return `${zahl(lenk / 60, 1)} Stunden Lenkzeit, geplant werden höchstens 9`;
+  if (arbeit > 9 * 60 && pausen < 45) return 'bei über 9 Stunden Arbeit fehlen 45 Minuten Pause';
+  if (arbeit > 6 * 60 && pausen < 30) return 'bei über 6 Stunden Arbeit fehlen 30 Minuten Pause';
+  return null;
 }
 const darfFahren = (f, l) => FS_RANG[f.fs] >= FS_RANG[l.fs];
 
 // ---------- Ladeprüfung ----------
-// Passt das Gerät auf den Lkw? ergebnis: ok | genehmigung | nein
+// Passt das Gerät allein auf den Lkw? ergebnis: ok | genehmigung | nein. Die Regeln stehen in beladung.js;
+// die Daten ändern sich nicht, darum wird das Ergebnis je Paar gemerkt.
+const ladeErgebnisse = new Map();
 function ladepruefung(g, l) {
-  const gruende = [];
-  let ergebnis = 'ok';
-  const nein = (txt) => { gruende.push({ art: 'nein', txt }); ergebnis = 'nein'; };
-  const gen = (txt) => { gruende.push({ art: 'genehmigung', txt }); if (ergebnis === 'ok') ergebnis = 'genehmigung'; };
-  if (g.gewicht > l.nutzlast) nein(`zu schwer: ${zahl(g.gewicht, 1)} t > ${zahl(l.nutzlast, 1)} t Nutzlast`);
-  if (g.l > l.laenge) nein(`zu lang: ${zahl(g.l)} m > ${zahl(l.laenge)} m Ladefläche`);
-  if (g.b > MAX_BREITE) {
-    if (l.breite < MAX_BREITE) nein(`zu breit: ${zahl(g.b)} m > ${zahl(l.breite)} m Ladefläche`);
-    else gen(`Überbreite: ${zahl(g.b)} m > ${zahl(MAX_BREITE)} m erlaubt`);
-  } else if (g.b > l.breite) {
-    nein(`zu breit: ${zahl(g.b)} m > ${zahl(l.breite)} m Ladefläche`);
+  const schluessel = g.id + l.id;
+  if (!ladeErgebnisse.has(schluessel)) {
+    const b = beladung(l, [[g]]);
+    const gruende = b.art === 'ok'
+      ? [{ art: 'ok', txt: `passt · Gesamthöhe ${zahl(b.hoehe)} m · Restnutzlast ${zahl(l.nutzlast - g.gewicht, 1)} t` }]
+      : b.gruende.map(({ art, txt }) => ({ art, txt }));
+    ladeErgebnisse.set(schluessel, { ergebnis: b.art, gruende });
   }
-  const gesamt = l.ladehoehe + g.h;
-  if (gesamt > MAX_HOEHE) gen(`Gesamthöhe ${zahl(gesamt)} m > ${zahl(MAX_HOEHE)} m erlaubt`);
-  if (ergebnis === 'ok') gruende.push({ art: 'ok', txt: `passt · Gesamthöhe ${zahl(gesamt)} m · Restnutzlast ${zahl(l.nutzlast - g.gewicht, 1)} t` });
-  return { ergebnis, gruende };
+  return ladeErgebnisse.get(schluessel);
 }
+const LADE_ABSTAND = 0.3; // Abstand zwischen zwei Geräten auf der Ladefläche in m
 
-// Mehrere Geräte zugleich (3D-Ladeplan): hintereinander auf der Ladefläche, 0,3 m Abstand
-const LADE_ABSTAND = 0.3;
-function ladeplan(lkw, geraete) {
-  let x = 0;
-  const plaetze = geraete.map((g) => { const p = { g, x, ueberhang: x + g.l > lkw.laenge }; x += g.l + LADE_ABSTAND; return p; });
-  const laenge = Math.max(0, x - LADE_ABSTAND);
-  const gewicht = geraete.reduce((s, g) => s + g.gewicht, 0);
-  const hoehe = geraete.reduce((m, g) => Math.max(m, lkw.ladehoehe + g.h), lkw.ladehoehe);
-  const breite = geraete.reduce((m, g) => Math.max(m, g.b), 0);
-  const probleme = [];
-  if (gewicht > lkw.nutzlast) probleme.push({ art: 'nein', txt: `zu schwer: ${zahl(gewicht, 1)} t > ${zahl(lkw.nutzlast, 1)} t Nutzlast` });
-  if (laenge > lkw.laenge) probleme.push({ art: 'nein', txt: `zu lang: ${zahl(laenge)} m > ${zahl(lkw.laenge)} m Ladefläche` });
-  if (breite > lkw.breite && breite <= MAX_BREITE) probleme.push({ art: 'nein', txt: `zu breit: ${zahl(breite)} m > ${zahl(lkw.breite)} m Ladefläche` });
-  if (breite > MAX_BREITE) probleme.push({ art: lkw.breite >= MAX_BREITE ? 'genehmigung' : 'nein', txt: `Überbreite: ${zahl(breite)} m > ${zahl(MAX_BREITE)} m` });
-  if (hoehe > MAX_HOEHE) probleme.push({ art: 'genehmigung', txt: `Gesamthöhe ${zahl(hoehe)} m > ${zahl(MAX_HOEHE)} m` });
-  return { plaetze, laenge, gewicht, hoehe, breite, probleme };
-}
+kundenEintragen(KUNDEN);
 
-function kandidaten(art, geraetId, ortId, start, tag = datum) {
-  const g = finde(GERAETE, geraetId);
-  const bis = start + dauerEinfach(art, ortId);
-  return LKW.map((l) => ({
-    lkw: l,
-    pruefung: ladepruefung(g, l),
-    frei: lkwFrei(l.id, start, bis, [], tag),
-    // kleinster ausreichender Führerschein zuerst, damit CE-Fahrer für Sattelzüge frei bleiben
-    fahrer: FAHRER.filter((f) => darfFahren(f, l) && fahrerFrei(f.id, start, bis, [], tag)).sort((a, b) => FS_RANG[a.fs] - FS_RANG[b.fs]),
-  }));
-}
-// Hätte ein eigener Lkw ohne Genehmigung fahren können?
-function interneAlternative(a) {
-  if (a.start + dauerEinfach(a.art, a.ort) > TAG_ENDE) return null; // intern nicht mehr am selben Tag machbar
-  return kandidaten(a.art, a.geraet, a.ort, a.start, a.tag || datum)
-    .find((k) => k.pruefung.ergebnis === 'ok' && k.frei && k.fahrer.length) || null;
-}
-
-// ---------- Anfrage-Cockpit ----------
-// Warum kein eigener Lkw? Reihenfolge wie die Prüfung: Maße, Uhrzeit, Lkw, Fahrer
-function speditionsGrund(a) {
-  const g = finde(GERAETE, a.geraet), ergebnisse = LKW.map((l) => ladepruefung(g, l).ergebnis);
-  if (!ergebnisse.includes('ok')) return ergebnisse.includes('genehmigung') ? 'nur mit Genehmigung transportierbar (Schwertransport)' : 'passt auf keinen eigenen Lkw';
-  if (a.start + dauerEinfach(a.art, a.ort) > TAG_ENDE) return `Rückkehr erst nach ${hhmm(TAG_ENDE)} Uhr`;
-  const passend = kandidaten(a.art, a.geraet, a.ort, a.start, a.tag).filter((k) => k.pruefung.ergebnis === 'ok');
-  return passend.some((k) => k.frei) ? 'kein Fahrer mit passender Klasse frei' : 'kein passender Lkw frei';
-}
-// Je offene Anfrage ein Vorschlag: kleinster passender freier eigener Lkw, sonst Spedition mit Grund.
-// Wie bei alternativenZuweisen zählt jeder Lkw und Fahrer nur für eine Anfrage (vorläufig belegt).
-// Liefert Map Anfrage-ID → { lkw, fahrer, bis, kosten } oder { grund }.
-function anfrageVorschlaege() {
-  const ergebnis = new Map(), reserviert = [];
-  try {
-    const offen = stand.alleAnfragen.filter((a) => a.tag >= HEUTE).sort((x, y) => x.tag.localeCompare(y.tag) || x.start - y.start);
-    for (const a of offen) {
-      const k = a.start + dauerEinfach(a.art, a.ort) > TAG_ENDE ? null : kandidaten(a.art, a.geraet, a.ort, a.start, a.tag)
-        .filter((x) => x.pruefung.ergebnis === 'ok' && x.frei && x.fahrer.length)
-        .sort((x, y) => x.lkw.nutzlast - y.lkw.nutzlast)[0];
-      if (!k) { ergebnis.set(a.id, { grund: speditionsGrund(a) }); continue; }
-      const platzhalter = { ...a, id: '_anf' + a.id, lkw: k.lkw.id, fahrer: k.fahrer[0].id };
-      stand.alleTouren.push(platzhalter);
-      reserviert.push(platzhalter);
-      ergebnis.set(a.id, { lkw: k.lkw, fahrer: k.fahrer[0], bis: ende(platzhalter), kosten: kostenIntern(platzhalter) });
-    }
-  } finally {
-    stand.alleTouren = stand.alleTouren.filter((t) => !reserviert.includes(t));
-  }
-  return ergebnis;
-}
-
-// Alle Speditionsaufträge zugleich: jeder freie Lkw und Fahrer zählt nur für einen Auftrag.
-// Liefert Map Spedition-ID → Alternative (oder null).
-function alternativenZuweisen() {
-  const ergebnis = new Map();
-  const reserviert = [];
-  try {
-    for (const sp of [...stand.sped].sort((a, b) => a.start - b.start)) {
-      const alt = interneAlternative(sp);
-      ergebnis.set(sp.id, alt);
-      if (alt) { // vorläufig belegen, damit der nächste Auftrag ihn nicht auch bekommt
-        const platzhalter = { ...sp, id: '_res' + sp.id, tag: sp.tag || datum, lkw: alt.lkw.id, fahrer: alt.fahrer[0].id };
-        stand.alleTouren.push(platzhalter);
-        reserviert.push(platzhalter);
-      }
-    }
-  } finally { // nur die eigenen Platzhalter-Objekte entfernen, nie echte Touren mit gleicher ID
-    stand.alleTouren = stand.alleTouren.filter((t) => !reserviert.includes(t));
-  }
-  return ergebnis;
-}
-
-// ---------- Kombi-Touren gegen Leerfahrten ----------
-// Auslieferung A + Abholung B: nach dem Abladen bei A direkt zu B, statt leer heimzufahren.
-const ABHOLFENSTER = 120; // Abholung darf sich um höchstens so viele Minuten verschieben
-function kombiVorschlaege() {
-  const liste = [];
-  const offen = stand.touren.filter((t) => status(t) === 'geplant' && !t.id.startsWith('_')); // nur Geplantes, keine Platzhalter
-  for (const a of offen) {
-    if (a.art !== 'Auslieferung' || a.kombi) continue;
-    const lkwA = finde(LKW, a.lkw);
-    for (const b of offen) {
-      if (b.art !== 'Abholung' || b.id === a.id) continue;
-      if (ladepruefung(finde(GERAETE, b.geraet), lkwA).ergebnis !== 'ok') continue;
-      const kombi = { ...a, kombi: { geraet: b.geraet, ort: b.ort, von: b.id } };
-      const kmVorher = kmTour(a) + kmTour(b), kmNachher = kmTour(kombi);
-      if (kmVorher - kmNachher < 20) continue;
-      const p = phasen(kombi), bis = p[p.length - 1].bis;
-      if (bis > TAG_ENDE) continue;
-      // das Aufladen ist immer der letzte Halt beim Kunden, auch wenn Liefer- und Abholort gleich sind
-      const abholNeu = p.filter((x) => x.typ === 'laden' && x.wo === b.ort).pop().von;
-      const abholAlt = b.start + fahrMinKm(finde(ORTE, b.ort).km);
-      if (Math.abs(abholNeu - abholAlt) > ABHOLFENSTER) continue;
-      const ohne = [a.id, b.id];
-      if (!lkwFrei(a.lkw, a.start, bis, ohne) || !fahrerFrei(a.fahrer, a.start, bis, ohne)) continue;
-      const sparKm = kmVorher - kmNachher;
-      const sparEuro = kostenIntern(a) + kostenIntern(b) - kostenIntern(kombi);
-      if (sparEuro <= 0) continue;
-      liste.push({ a, b, kmVorher, kmNachher, sparKm, sparEuro, abholNeu, abholAlt, bis });
-    }
-  }
-  // Jede Tour nur in einem Vorschlag, der beste zuerst
-  const vergeben = new Set();
-  return liste.sort((x, y) => y.sparEuro - x.sparEuro).filter((v) => {
-    if (vergeben.has(v.a.id) || vergeben.has(v.b.id)) return false;
-    vergeben.add(v.a.id); vergeben.add(v.b.id);
-    return true;
-  });
-}
-function kombiUebernehmen(aId, bId) {
-  const a = finde(stand.touren, aId), b = finde(stand.touren, bId);
-  if (!a || !b) return false;
-  const v = kombiVorschlaege().find((x) => x.a.id === aId && x.b.id === bId);
-  if (!v) return false; // inzwischen nicht mehr gültig
-  a.kombi = { geraet: b.geraet, ort: b.ort, von: b.id };
-  stand.touren = stand.touren.filter((t) => t.id !== bId);
-  speichern();
-  return true;
-}
-
-// ---------- Kosten ----------
-function kostenIntern(t) {
-  const l = finde(LKW, t.lkw);
-  return kmTour(t) * l.kmSatz + (ende(t) - t.start) / 60 * stand.kosten.fahrerStunde;
-}
+// ---------- Kosten (Schätzung aus den Annahmen in KOSTEN_START) ----------
 function kostenSpedition(s) {
   const k = stand.kosten, g = finde(GERAETE, s.geraet), o = finde(ORTE, s.ort);
   const schwer = !LKW.some((l) => ladepruefung(g, l).ergebnis === 'ok');
   return (k.spedGrund + 2 * o.km * k.spedKm) * (schwer ? k.schwerFaktor : 1);
-}
-function kostenAlternative(s, alt) { // interne Kosten, wenn der freie eigene Lkw gefahren wäre
-  return kostenIntern({ ...s, lkw: alt.lkw.id, fahrer: alt.fahrer[0].id });
-}
-function leerKm() {
-  return stand.touren.reduce((s, t) => s + phasen(t).filter((x) => x.typ === 'fahrt' && !x.ladung).reduce((a, x) => a + x.km, 0), 0);
 }

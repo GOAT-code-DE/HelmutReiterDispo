@@ -262,24 +262,43 @@ function lkwModell(l, kabinenFarbe = '#f2f4f5') {
     add(quader(0.6, 0.45, 0.45, dunkel, 0.6, rahmenY - 0.3, B / 2 - 0.35));
   }
 
-  // Ladefläche: Stahlboden, Seitenprofile, Rungentaschen, Stirnwand als Gitter, Rampen, Rücklichter
-  add(quader(L, 0.16, B, deckMat, L / 2, l.ladehoehe - 0.16, 0));
-  for (let x = 0.6; x < L - 0.3; x += 0.6) add(quader(0.03, 0.005, B * 0.98, mat('#575d63'), x, l.ladehoehe, 0)); // Bodenfugen
-  for (const sz of [-1, 1]) {
-    add(quader(L, 0.2, 0.08, alu, L / 2, l.ladehoehe - 0.24, sz * (B / 2 - 0.04)));
-    add(quader(L, 0.05, 0.1, gruen, L / 2, l.ladehoehe - 0.3, sz * (B / 2 - 0.02)));
-    for (let x = 0.5; x < L - 0.2; x += 1.2) add(quader(0.1, 0.18, 0.06, dunkel, x, l.ladehoehe - 0.22, sz * (B / 2 + 0.01)));
+  // Ladefläche je Zone (Schwanenhals, Tiefbett …): Stahlboden, Bodenfugen, Seitenprofile; an Stufen eine senkrechte Wand
+  let z0 = 0, vorher = null;
+  for (const zo of l.zonen) {
+    const h = zo.hoehe, mitte = z0 + zo.laenge / 2;
+    add(quader(zo.laenge, 0.16, B, deckMat, mitte, h - 0.16, 0));
+    for (let x = z0 + 0.6; x < z0 + zo.laenge - 0.3; x += 0.6) add(quader(0.03, 0.005, B * 0.98, mat('#575d63'), x, h, 0));
+    for (const sz of [-1, 1]) {
+      add(quader(zo.laenge, 0.2, 0.08, alu, mitte, h - 0.24, sz * (B / 2 - 0.04)));
+      add(quader(zo.laenge, 0.05, 0.1, gruen, mitte, h - 0.3, sz * (B / 2 - 0.02)));
+    }
+    if (vorher !== null && vorher !== h) add(quader(0.12, Math.abs(vorher - h) + 0.16, B, deckMat, z0, Math.min(vorher, h) - 0.16, 0));
+    vorher = h; z0 += zo.laenge;
   }
+  const zoneBei = (x) => { let a = 0; for (const zo of l.zonen) { if (x <= a + zo.laenge + 1e-9) return zo; a += zo.laenge; } return l.zonen[l.zonen.length - 1]; };
+  // Zurrpunkte: gelbe Ösen links und rechts
+  const oese = mat('#f2b705', { roughness: 0.4, metalness: 0.5 });
+  for (const x of l.zurr) for (const sz of [-1, 1]) {
+    const o = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.025, 8, 16), oese);
+    o.position.set(x, zoneBei(x).hoehe + 0.02, sz * (B / 2 - 0.14));
+    o.rotation.x = Math.PI / 2;
+    o.userData.zurr = true;
+    add(o);
+  }
+  // Stirnwand als Gitter, hochgeklappte Auffahrrampen bzw. Ladebordwand, Rücklichter
+  const vornH = l.zonen[0].hoehe, hintenH = l.zonen[l.zonen.length - 1].hoehe;
   const stirnH = klein ? 0.6 : 1.0;
-  for (const sz of [-1, 1]) add(quader(0.1, stirnH, 0.1, alu, -0.05, l.ladehoehe, sz * (B / 2 - 0.05)));
-  add(quader(0.1, 0.08, B, alu, -0.05, l.ladehoehe + stirnH - 0.08, 0));
-  for (let i = 1; i < 6; i++) add(quader(0.04, stirnH - 0.1, 0.04, alu, -0.05, l.ladehoehe, -B / 2 + i * B / 6));
-  if (/Rampen/.test(l.typ)) for (const sz of [-1, 1]) {                                      // hochgeklappte Auffahrrampen
-    const rampe = quader(0.1, Math.min(2.2, l.laenge * 0.3), 0.45, alu, L - 0.08, l.ladehoehe, sz * (B / 2 - 0.4));
+  for (const sz of [-1, 1]) add(quader(0.1, stirnH, 0.1, alu, -0.05, vornH, sz * (B / 2 - 0.05)));
+  add(quader(0.1, 0.08, B, alu, -0.05, vornH + stirnH - 0.08, 0));
+  for (let i = 1; i < 6; i++) add(quader(0.04, stirnH - 0.1, 0.04, alu, -0.05, vornH, -B / 2 + i * B / 6));
+  if (l.rampe.art === 'rampe') for (const sz of [-1, 1]) {
+    const rampe = quader(0.1, Math.min(2.2, l.laenge * 0.3), 0.45, alu, L - 0.08, hintenH, sz * (B / 2 - 0.4));
     rampe.rotation.z = 0.12; add(rampe);
+  } else {
+    add(quader(0.08, Math.min(1.2, l.rampe.laenge * 0.6), B * 0.9, alu, L + 0.04, hintenH - 0.1, 0));                  // Ladebordwand, hochgeklappt
   }
-  for (const sz of [-1, 1]) add(quader(0.05, 0.12, 0.3, rot, L + 0.02, l.ladehoehe - 0.34, sz * (B / 2 - 0.3)));
-  add(quader(0.03, 0.12, 0.5, mat('#f5f5f5'), L + 0.02, l.ladehoehe - 0.36, 0));                  // Kennzeichen
+  for (const sz of [-1, 1]) add(quader(0.05, 0.12, 0.3, rot, L + 0.02, hintenH - 0.34, sz * (B / 2 - 0.3)));
+  add(quader(0.03, 0.12, 0.5, mat('#f5f5f5'), L + 0.02, hintenH - 0.36, 0));                  // Kennzeichen
 
   // Räder: vorne einzeln, hinten Zwilling; Sattelzug mit Zugmaschinen- und Aufliegerachsen
   const vorn = kx - 0.05, zRad = (Math.max(B, kabB) / 2 - 0.22);
@@ -294,9 +313,6 @@ function lkwModell(l, kabinenFarbe = '#f2f4f5') {
   for (const a of achsen) for (const sz of [-1, 1]) {
     add(rad(a.r, 0.32, a.x, a.r, sz * zRad));
     if (a.zwilling) add(rad(a.r, 0.32, a.x, a.r, sz * (zRad - 0.34)));
-  }
-  if (rTrailer * 2 + 0.1 > l.ladehoehe) {                                                        // Tiefbett: Radkasten über den Achsen
-    add(quader(2.7, rTrailer * 2 + 0.16 - l.ladehoehe, B, deckMat, L - 1.35, l.ladehoehe, 0));
   }
   for (const sz of [-1, 1]) add(quader(0.04, 0.5, 0.5, kotflg, (hinten[hinten.length - 1]) + 0.65, rTrailer * 1.1, sz * zRad));   // Spritzlappen
   grp.userData.laenge = L + kabL + 0.6;
