@@ -926,31 +926,37 @@ function rundgangStarten() {
   if (datum !== ladetag()) datumSetzen(ladetag());
   waehleAnsicht('planen');
   planZuruecksetzen(); meldung = null; renderPlanen();
+  rundgangOeffnen(0, false);
+}
+// „Made by GOAT code“ antippen: dieselbe Karte wie am Ende des Rundgangs, ohne den Rundgang und ohne den Plan anzufassen
+function kontaktZeigen() { if (!rg) rundgangOeffnen(RUNDGANG.length - 1, true); }
+function rundgangOeffnen(schritt, einzeln) {
   if (!rg) {
-    rg = { schritt: 0, huelle: el('div', { class: 'rundgang', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'rg-titel' }) };
+    rg = { huelle: el('div', { class: 'rundgang', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'rg-titel' }) };
     document.body.append(rg.huelle);
   }
   $('.app').inert = true; // Hintergrund weder per Maus noch per Tab erreichbar
-  rg.schritt = 0;
+  rg.schritt = schritt; rg.einzeln = einzeln;
   rundgangZeigen();
 }
 function rundgangEnde() {
   try { localStorage.setItem(RUNDGANG_GESEHEN, 'ja'); } catch (e) { /* ohne Speicher startet er beim nächsten Öffnen wieder */ }
+  const einzeln = rg?.einzeln;
   rg?.huelle.remove();
   rg?.loch.remove();
   rg = null;
   $('.app').inert = false;
-  $('#rundgang-knopf').focus();
+  $(einzeln ? '#made-by' : '#rundgang-knopf').focus();
 }
 function rundgangZeigen() {
   const s = RUNDGANG[rg.schritt], letzter = rg.schritt === RUNDGANG.length - 1;
   s.vorher?.();
-  const weiter = knopf(letzter ? 'Fertig' : 'Weiter', { class: 'knopf', id: 'rg-weiter' }, () => { if (letzter) rundgangEnde(); else { rg.schritt++; rundgangZeigen(); } });
+  const weiter = knopf(rg.einzeln ? 'Schließen' : letzter ? 'Fertig' : 'Weiter', { class: 'knopf', id: 'rg-weiter' }, () => { if (letzter) rundgangEnde(); else { rg.schritt++; rundgangZeigen(); } });
   const karte = el('div', { class: 'rg-karte' },
     el('h2', { id: 'rg-titel' }, s.titel()), el('p', {}, ...[].concat(s.text())), // Text oder Liste aus Text und Elementen
-    el('div', { class: 'rg-fuss' }, el('span', { class: 'rg-zahl' }, `${rg.schritt + 1} von ${RUNDGANG.length}`),
-      knopf('Überspringen', { class: 'knopf zweit', id: 'rg-ueberspringen' }, rundgangEnde),
-      ...(rg.schritt ? [knopf('Zurück', { class: 'knopf zweit', id: 'rg-zurueck' }, () => { rg.schritt--; rundgangZeigen(); })] : []),
+    el('div', { class: 'rg-fuss' }, ...(rg.einzeln ? [el('span', { class: 'rg-zahl' })] : [el('span', { class: 'rg-zahl' }, `${rg.schritt + 1} von ${RUNDGANG.length}`),
+      knopf('Überspringen', { class: 'knopf zweit', id: 'rg-ueberspringen' }, rundgangEnde)]),
+      ...(rg.schritt && !rg.einzeln ? [knopf('Zurück', { class: 'knopf zweit', id: 'rg-zurueck' }, () => { rg.schritt--; rundgangZeigen(); })] : []),
       weiter));
   // Am Handy hängt der Rahmen fest am Ziel (absolut im Dokument) und rollt beim Wischen mit dem Inhalt mit; sonst liegt er fest über dem Bild
   rg.loch?.remove();
@@ -1026,6 +1032,7 @@ $('#tag-zurueck').addEventListener('click', () => datumSetzen(tagPlus(datum, -1)
 $('#tag-vor').addEventListener('click', () => datumSetzen(tagPlus(datum, 1)));
 $('#tag-heute').addEventListener('click', () => datumSetzen(HEUTE));
 $('#rundgang-knopf').addEventListener('click', rundgangStarten);
+$('#made-by').addEventListener('click', kontaktZeigen);
 document.querySelectorAll('#rechts-richtung [data-richtung]').forEach((b) => b.addEventListener('click', () => { richtung3d = b.dataset.richtung; ladungZeigen(plan.touren[planGewaehlt]); }));
 $('#kunden-neu').addEventListener('click', () => transportOeffnen('neu'));
 $('#kunden-suche').addEventListener('input', (e) => { kf.suche = e.target.value; renderKunden(); });

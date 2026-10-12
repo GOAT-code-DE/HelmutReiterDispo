@@ -76,6 +76,17 @@ with sync_playwright() as p:
     pg.click('#rg-ueberspringen'); pg.wait_for_timeout(300)
     pg.reload(); pg.wait_for_timeout(1500)
     pruefe('Rundgang: Überspringen gilt als gesehen', pg.locator('.rundgang').count() == 0)
+    # „Made by GOAT code“ antippen: dieselbe Kontaktkarte wie am Ende des Rundgangs, nur mit „Schließen“, der Plan bleibt
+    pg.click('#beladung-berechnen'); pg.wait_for_timeout(800); pg.click('.fahrt-zeile[data-fahrt="L05"]'); pg.wait_for_timeout(300)
+    pg.click('#made-by'); pg.wait_for_timeout(500)
+    karte = pg.inner_text('.rg-karte') if pg.locator('.rg-karte').count() else ''
+    knoepfe = pg.locator('.rg-fuss button').all_inner_texts()
+    pruefe(f'Made by: Tippen zeigt die Kontaktkarte aus Schritt 8, nur mit „Schließen“ ({knoepfe})', 'Made by GOAT code' in karte and 'fabian.vanboxem@goat-code.de' in karte
+           and 'www.goat-code.de' in karte and knoepfe == ['Schließen'] and 'von 8' not in karte)
+    pg.click('#rg-weiter'); pg.wait_for_timeout(300)
+    pruefe('Made by: nach „Schließen“ ist der Plan mit der gewählten Fahrt noch da, Fokus zurück auf „Made by“', pg.locator('.rundgang').count() == 0
+           and pg.get_attribute('.fahrt-zeile[data-fahrt="L05"]', 'aria-pressed') == 'true' and pg.evaluate("document.activeElement.id") == 'made-by'
+           and not pg.evaluate("document.querySelector('.app').inert"))
 
     # Planen: links die Transporte, rechts vor dem Berechnen die Kunden auf der Karte
     frisch(pg)

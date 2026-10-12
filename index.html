@@ -57,7 +57,7 @@
   .kopf { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 16px; }
   .marken { display: flex; align-items: center; gap: 12px; margin-right: auto; min-width: 0; }
   .kopf .logo { height: 26px; }
-  .made-by { font-size: 12px; color: var(--leise); white-space: nowrap; border-left: 1px solid var(--linie); padding-left: 12px; letter-spacing: .02em; }
+  .made-by { font: inherit; font-size: 12px; color: var(--leise); white-space: nowrap; background: none; border: 0; border-left: 1px solid var(--linie); padding: 0 0 0 12px; min-height: 32px; letter-spacing: .02em; cursor: pointer; }
   .made-by b { color: var(--text); font-weight: 700; }
   .datumswahl { display: flex; align-items: center; gap: 6px; }
   .datumswahl input { padding: 6px 8px; border: 1px solid var(--linie); border-radius: 10px; background: #fff; font-size: 14px; min-width: 0; min-height: 36px; }
@@ -405,7 +405,7 @@
   <header class="kopf panel">
     <div class="marken">
       <img class="logo" src="logo.svg" alt="Helmut Reiter">
-      <span class="made-by" id="made-by">Made by <b>GOAT code</b></span>
+      <button type="button" class="made-by" id="made-by" title="Kontakt zu GOAT code">Made by <b>GOAT code</b></button>
     </div>
     <div class="datumswahl" role="group" aria-label="Tag wählen">
       <button class="knopf zweit klein symbol" id="tag-zurueck" aria-label="Vorheriger Tag" title="Vorheriger Tag" data-icon="links"></button>
