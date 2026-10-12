@@ -74,6 +74,19 @@ with sync_playwright() as p:
            and '11 ausliefern, 3 abholen' in kopf and '7 Kunden' in kopf and pg.locator('#plan-auftraege [data-art="Abholung"]').count() == 3)
     pruefe('Planen: Abholungen mit Abholfenster, Kunden mit Firmennamen', 'abholen 11:00–16:00 Uhr' in pg.inner_text('#plan-auftraege')
            and 'Vestische Industriemontage GmbH (Recklinghausen)' in pg.inner_text('#plan-auftraege'))
+    gr = pg.evaluate("[...document.querySelectorAll('#plan-auftraege .kunde-gruppe')].map(s => [s.dataset.ort, s.querySelectorAll('[data-auftrag]').length])")
+    pruefe(f'Planen: Transporte nach Kunde gruppiert, 7 Gruppen, Duisburg mit 3 Geräten zuerst ({gr})', len(gr) == 7 and sum(n for _, n in gr) == 14
+           and gr[0][1] == 3 and 'Duisburg' in pg.inner_text('#plan-auftraege .kunde-gruppe h3'))
+    # Reihenfolge der Gruppen gegen die Daten: früheste Frist je Kunde (Abholung: Fensterbeginn) aufsteigend
+    folge = pg.evaluate("""(() => { const f = (a) => (istAbholung(a) ? a.ab : a.bis), m = {};
+      for (const a of offeneAuftraege()) m[a.ort] = Math.min(m[a.ort] ?? 1e9, f(a));
+      return [...document.querySelectorAll('#plan-auftraege .kunde-gruppe')].map(s => m[s.dataset.ort]); })()""")
+    pruefe(f'Planen: Kundengruppen nach frühester Frist sortiert ({folge})', len(folge) == 7 and folge == sorted(folge))
+    reihen = pg.evaluate("""[...document.querySelectorAll('#plan-auftraege .kunde-gruppe')].map(s => [s.querySelector('h3 small').textContent,
+      [...s.querySelectorAll('li')].map(l => l.querySelector('small').textContent)])""")
+    wuppertal = [r for r in reihen if r[0].startswith('abholen ab')]
+    pruefe(f'Planen: reine Abholgruppe mit „abholen ab“ im Kopf und Fenster je Zeile, Auslieferung ohne doppelte Frist ({wuppertal}, {reihen[0]})',
+           len(wuppertal) == 1 and all('–' in z for z in wuppertal[0][1]) and reihen[0][1] == ['ausliefern'] * 3)
     pruefe('Planen: vor dem Berechnen kein Ergebnis', pg.locator('.tourkarte').count() == 0)
     pg.click('#beladung-berechnen'); pg.wait_for_timeout(800)
     pruef = pg.inner_text('#plan-pruef')
@@ -124,6 +137,41 @@ with sync_playwright() as p:
     pg.click('#etappen [data-etappe="1"]'); pg.wait_for_timeout(500)
     linien = pg.evaluate("karte.getSource('route').serialize().data.features.map(f => f.properties.aktiv)")
     pruefe(f'Route: Rückfahrt nach dem zusammengefassten Stopp hebt den richtigen Kartenabschnitt hervor ({linien})', linien == [False, False, True])
+
+    # Planen: flacher Ladeplan je Fahrt in der Tourkarte (jedes Gerät ein Block mit Stoppnummer), rechts Umschalter Karte / Ladung in 3D
+    bilder = pg.evaluate("""[...document.querySelectorAll('.tourkarte')].map(k => [k.dataset.lkw, k.querySelectorAll('.tk-bild svg').length,
+      k.querySelectorAll('.tk-bild svg [data-geraet]').length, k.querySelectorAll('[data-verschieben]').length])""")
+    pruefe(f'Flacher Ladeplan: jede Fahrt mit Plan, jedes Gerät als Block, gemischte Fahrten (103, 110) mit Hinweg und Rückweg ({bilder})',
+           len(bilder) == 7 and all(n >= 1 and bl == g for _, n, bl, g in bilder) and {x[0]: x[1] for x in bilder}['L03'] == 2 and {x[0]: x[1] for x in bilder}['L10'] == 2
+           and pg.locator('.tourkarte[data-lkw="L03"] .tk-bild small').all_inner_texts() == ['Abfahrt am Hof', 'Rückweg'])
+    nummern = pg.locator('.tourkarte[data-lkw="L03"] .tk-bild svg [data-geraet] text:first-of-type').all_text_contents()  # SVG-Text hat kein innerText
+    pruefe(f'Flacher Ladeplan: Blöcke tragen die Stoppnummer ({nummern})', nummern == ['1', '1', '2'])
+    # Blöcke: echte Rechtecke in Stoppfarbe, ganz im Bildausschnitt, nicht übereinander
+    lage = pg.evaluate("""[...document.querySelectorAll('.tourkarte .tk-bild svg')].map(svg => {
+      const vb = svg.viewBox.baseVal, r = [...svg.querySelectorAll('[data-geraet] rect')].map(e => e.getBBox()).sort((a, b) => a.x - b.x);
+      return { n: r.length, farbe: [...svg.querySelectorAll('[data-geraet] rect')].every(e => /^#[0-9a-f]{6}$/i.test(e.getAttribute('fill'))),
+        drin: r.every(b => b.width > 4 && b.height > 4 && b.x >= vb.x && b.y >= vb.y && b.x + b.width <= vb.x + vb.width && b.y + b.height <= vb.y + vb.height),
+        frei: r.every((b, i) => i === 0 || b.x >= r[i - 1].x + r[i - 1].width - 0.5) }; })""")
+    pruefe(f'Flacher Ladeplan: Blöcke sichtbar, im Bild, ohne Überdeckung ({lage})', len(lage) == 9 and all(x['n'] > 0 and x['farbe'] and x['drin'] and x['frei'] for x in lage))
+    hoch = pg.evaluate("""(() => { const l = finde(LKW, 'L09'), g = GERAETE.reduce((m, x) => (x.h > m.h ? x : m)), svg = seitenansicht(l, [{ g, x: 0.5, zone: l.zonen[l.zonen.length - 1], stopp: 0 }]);
+      document.body.append(svg); const vb = svg.viewBox.baseVal, b = svg.querySelector('[data-geraet] rect').getBBox(); svg.remove();
+      return [g.kurz, b.y >= vb.y]; })()""")
+    pruefe(f'Flacher Ladeplan: höchstes Gerät über 4 m wird nicht abgeschnitten ({hoch})', hoch[1])
+    pruefe('3D Planen: Umschalter sichtbar, Karte gewählt, keine 3D-Fläche', pg.locator('#rechts-wahl').is_visible()
+           and pg.get_attribute('#rechts-wahl [data-rechts="karte"]', 'aria-selected') == 'true' and not pg.locator('#plan-3d').is_visible())
+    pg.click('#rechts-wahl [data-rechts="ladung"]'); pg.wait_for_timeout(600)
+    pruefe('3D Planen: „Ladung in 3D“ zeigt drehbare Szene statt Karte, Hin/Rückweg-Wahl bei gemischter Fahrt',
+           pg.locator('#plan-3d canvas').is_visible() and not pg.locator('#plan-karte').is_visible()
+           and pg.inner_text('#karte-titel') == 'Ladung · E-HR 110' and pg.locator('#rechts-richtung').is_visible())
+    pg.click('#fahrt-wahl [data-fahrt="L04"]'); pg.wait_for_timeout(500)
+    pruefe('3D Planen: Fahrt nur mit Auslieferung ohne Hin/Rückweg-Wahl', pg.locator('#plan-3d canvas').is_visible() and not pg.locator('#rechts-richtung').is_visible())
+    rbild = pg.locator('.tourkarte[data-lkw="L03"] .tk-bild[data-richtung="rueck"]')
+    if rbild.count(): rbild.click(); pg.wait_for_timeout(500)  # ohne Bild wird die Prüfung rot statt abzubrechen
+    pruefe('3D Planen: Klick aufs Rückweg-Bild wählt die Fahrt und zeigt rechts den Rückweg in 3D',
+           pg.inner_text('#karte-titel') == 'Ladung · E-HR 103' and pg.get_attribute('#rechts-richtung [data-richtung="rueck"]', 'aria-selected') == 'true')
+    pg.click('#etappen [data-etappe="0"]'); pg.wait_for_timeout(500)
+    pruefe('3D Planen: Klick auf eine Etappe schaltet zurück auf die Karte', pg.locator('#plan-karte').is_visible() and not pg.locator('#plan-3d').is_visible()
+           and pg.inner_text('#karte-titel') == 'Route · E-HR 103')
     pg.click('#fahrt-wahl [data-fahrt="L05"]'); pg.wait_for_timeout(300)
 
     # Von Hand umlegen: abgelehnt mit Grund, gelungen, schlechter als Vorschlag, wiederherstellen
@@ -318,12 +366,20 @@ with sync_playwright() as p:
 
     # Ladeliste für den Fahrer: Druck mit Hin- und Rückweg, Stellplätzen, Adressen und Stopps
     pg.evaluate("window.gedruckt = 0; window.print = () => { window.gedruckt++; }; 0")  # ohne „; 0“ ruft Playwright die Funktion selbst auf
-    pg.locator('.tourkarte[data-lkw="L10"] [data-ladeliste]').click(); pg.wait_for_timeout(300)
+    # decode() künstlich verzögern: gedruckt werden darf erst, wenn die Bilder fertig sind
+    pg.evaluate("""(() => { const d = HTMLImageElement.prototype.decode; window.decodeFertig = 0;
+      HTMLImageElement.prototype.decode = function () { return new Promise((ok) => setTimeout(ok, 700)).then(() => d.call(this)).then(() => { window.decodeFertig++; }); }; })()""")
+    pg.locator('.tourkarte[data-lkw="L10"] [data-ladeliste]').click(); pg.wait_for_timeout(200)
+    vorher = pg.evaluate('window.gedruckt')
+    pg.wait_for_function('window.gedruckt == 1', timeout=5000)
+    pruefe(f'Ladeliste: Druck wartet, bis die Bilder geladen sind (nach 0,2 s gedruckt: {vorher})', vorher == 0 and pg.evaluate('window.decodeFertig') == 2)
     druck = pg.evaluate("document.querySelector('#druck').textContent")
+    dbild = pg.evaluate("[...document.querySelectorAll('#druck img.druck-bild')].map(i => i.complete && i.naturalWidth > 0 && i.src.startsWith('data:image/png'))")
+    pruefe(f'Ladeliste: 3D-Bild für Hinweg und Rückweg, beim Drucken geladen ({dbild})', dbild == [True, True])
     pruefe('Ladeliste: Druck ausgelöst, Hinweg und Rückweg, Adressen, ohne Kettenvorgabe', pg.evaluate('window.gedruckt') == 1 and 'Ladeliste E-HR 110' in druck
            and 'Am Hof aufladen' in druck and 'Unterwegs aufladen' in druck and 'Blitzkuhlenstraße 101' in druck and 'Herr Peters' in druck and 'Kette' not in druck
            and pg.locator('#druck table').count() == 2)
-    pg.locator('.tourkarte[data-lkw="L08"] [data-ladeliste]').click(); pg.wait_for_timeout(300)
+    pg.locator('.tourkarte[data-lkw="L08"] [data-ladeliste]').click(); pg.wait_for_function('window.gedruckt == 2', timeout=5000)
     reihe = pg.locator('#druck table').first.locator('tr td:nth-child(4)').all_inner_texts()
     pruefe(f'Ladeliste: zuerst aufgeladen wird der letzte Kunde ({reihe})', pg.evaluate('window.gedruckt') == 2 and [x[0] for x in reihe] == ['2', '1'])
     pg.emulate_media(media='print')

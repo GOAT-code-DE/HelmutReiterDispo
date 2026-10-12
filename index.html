@@ -102,53 +102,81 @@
   .balken.breit { width: 100%; margin: 4px 0 0; }
   .balken i { display: block; height: 100%; background: var(--gruen); }
 
-  /* Planen: links Aufträge und Ergebnis, rechts die Karte der gewählten Fahrt */
-  .planen { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 38%); gap: 18px; align-items: start; }
-  .auftraege { list-style: none; padding: 0; margin: 0 0 14px; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
-  .auftraege li { background: var(--schiefer-hell); border-radius: 10px; padding: 8px 10px; font-size: 13px; line-height: 1.35; display: flex; gap: 10px; align-items: center; }
-  .auftraege li > span { min-width: 0; }
-  .auftraege li b { display: block; font-weight: 500; }
-  .auftraege li small { display: block; color: var(--leise); margin-top: 2px; }
-  .auftraege li small .marke { margin-right: 2px; }
-  .auftraege .frist { white-space: nowrap; }
+  /* Planen: links die Liste (Transporte, dann Fahrten), rechts die gewählte Fahrt; beide Spalten rollen für sich */
+  #v-planen { overflow: hidden; }
+  .planen { display: grid; grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); height: 100%; }
+  .plan-liste { border-right: 1px solid var(--linie); overflow-y: auto; padding: 18px 16px 0; display: flex; flex-direction: column; min-height: 0; }
+  .plan-liste h1 { margin: 0; font-size: 20px; }
+  .plan-datum { margin: 2px 0 14px; color: var(--leise); }
+  .plan-detail { overflow-y: auto; padding: 18px 20px 20px; min-width: 0; }
+  .zahlen { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0 0 10px; }
+  .zahl-kachel { background: var(--schiefer-hell); border-radius: 12px; padding: 8px 10px; }
+  .zahl-kachel b { display: block; font-size: 20px; font-weight: 500; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  .zahl-kachel small { color: var(--leise); font-size: 12px; }
+  .ergebnis-text { font-size: 13px; color: var(--schiefer); line-height: 1.45; margin: 0 0 12px; }
+  .ergebnis-text.geaendert { background: var(--warn-hell); color: #7a4f10; border-radius: 10px; padding: 8px 10px; }
+  .liste-titel { font-size: 12px; font-weight: 500; color: var(--leise); text-transform: uppercase; letter-spacing: .06em; margin: 14px 0 6px; }
+  .zeilen { list-style: none; padding: 0; margin: 0; }
+  .auftrag-zeile { display: grid; grid-template-columns: 4px minmax(0, 1fr) auto 36px; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--linie); }
+  .auftrag-zeile .art-strich { align-self: stretch; border-radius: 2px; background: var(--gruen); }
+  .auftrag-zeile[data-art="Abholung"] .art-strich { background: var(--blau); }
+  .auftrag-zeile b { display: block; font-weight: 500; font-size: 14px; }
+  .auftrag-zeile small { display: block; color: var(--leise); font-size: 12px; margin-top: 1px; }
+  .auftrag-zeile .zeit { text-align: right; font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .fahrt-zeile { display: block; width: 100%; text-align: left; border: 1px solid transparent; border-radius: 12px; background: none; padding: 10px 12px; margin: 0 0 4px; cursor: pointer; color: var(--text); }
+  .fahrt-zeile:hover { background: var(--schiefer-hell); }
+  .fahrt-zeile[aria-pressed="true"] { background: var(--gruen-hell); border-color: #bfe3c8; }
+  .fz-kopf { display: flex; align-items: baseline; gap: 8px; }
+  .fz-kopf b { font-size: 15px; font-weight: 500; white-space: nowrap; }
+  .fz-kopf small { color: var(--leise); font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fz-kopf .fz-zeit { margin-left: auto; font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .fz-stopps { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; font-size: 13px; }
+  .fz-stopps > span { display: inline-flex; align-items: center; gap: 5px; }
+  .fz-info { display: block; color: var(--leise); font-size: 12px; margin-top: 4px; }
+  .sped-zeile { border: 1px dashed #e2c48f; border-radius: 12px; padding: 8px 12px; margin: 0 0 6px; font-size: 13px; }
+  .sped-zeile small { display: block; color: var(--leise); margin-top: 2px; }
+  .offen-klapp { margin: 10px 0 0; font-size: 13px; }
+  .offen-klapp summary { cursor: pointer; color: var(--schiefer); padding: 6px 0; min-height: 36px; display: flex; align-items: center; }
+  .plan-aktionen { position: sticky; bottom: 0; background: var(--flaeche); margin-top: auto; padding: 12px 0 16px; display: flex; flex-wrap: wrap; gap: 8px; border-top: 1px solid var(--linie); }
+  .plan-aktionen .knopf.gross { flex: 1 1 auto; }
   .farbpunkt { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: none; }
-  .auftraege li .x { margin-left: auto; }
   .werkstatt-hinweis { background: var(--rot-hell); color: var(--rot); border-radius: 10px; padding: 8px 12px; font-size: 13px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-  .pruefzeile { background: var(--gruen-hell); color: var(--gruen-dunkel); border-radius: 12px; padding: 12px 14px; margin: 16px 0; font-size: 14px; line-height: 1.5; }
-  .pruefzeile b { font-size: 16px; color: var(--text); }
-  .pruefzeile.geaendert { background: var(--warn-hell); color: #7a4f10; }
-  .meldung { min-height: 1.4em; margin: 8px 0; font-size: 14px; color: var(--gruen-dunkel); }
+  .meldung { margin: 0 0 10px; font-size: 13px; color: var(--gruen-dunkel); line-height: 1.4; }
   .meldung.warn { color: var(--rot); }
-  .tourkarte { border: 1px solid var(--linie); border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; background: #fff; }
-  .tourkarte.gewaehlt { border-color: var(--gruen); box-shadow: 0 0 0 3px var(--gruen-hell); }
-  .tk-kopf { display: flex; justify-content: space-between; gap: 6px 12px; flex-wrap: wrap; align-items: baseline; width: 100%; border: none; background: none; padding: 0; text-align: left; cursor: pointer; color: inherit; min-height: 40px; }
-  .tk-kopf strong { font-size: 16px; }
-  .tk-kopf small { color: var(--leise); font-size: 13px; }
-  .stopps { list-style: none; padding: 0; margin: 8px 0 0; }
-  .stopps > li { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 8px; padding: 8px 0; border-top: 1px solid var(--linie); }
+  /* rechts: Kopf der Fahrt, Ladung in 3D, Karte und Etappen, Stopps und Gründe */
+  .detail-kopf { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 16px; margin: 0 0 14px; }
+  .detail-kopf h2 { margin: 0; font-size: 22px; }
+  .detail-kopf h2 small { font-size: 14px; color: var(--leise); font-weight: 400; margin-left: 6px; }
+  .detail-kopf p { margin: 3px 0 0; color: var(--schiefer); }
+  .detail-kopf .knopfreihe { margin: 0 0 0 auto; }
+  .detail-leer h2 { margin: 0 0 4px; font-size: 20px; }
+  .detail-leer p { margin: 0 0 14px; color: var(--schiefer); max-width: 60ch; line-height: 1.5; }
+  .detail-3d { position: relative; border-radius: 14px; overflow: hidden; background: linear-gradient(#f4f6f9, #e8ecf1); margin: 0 0 14px; }
+  #plan-3d { height: clamp(260px, 40vh, 440px); touch-action: pan-y; } /* seitlich ziehen dreht, hoch und runter rollt die Seite */
+  #plan-3d canvas { display: block; cursor: grab; }
+  .detail-3d #rechts-richtung { position: absolute; left: 12px; top: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.08); background: rgba(255,255,255,.92); }
+  .detail-3d-hinweis { position: absolute; right: 12px; bottom: 10px; font-size: 12px; color: var(--leise); background: rgba(255,255,255,.85); padding: 2px 8px; border-radius: 8px; pointer-events: none; }
+  .detail-unten { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  #plan-karte { height: 320px; border-radius: 14px; overflow: hidden; background: var(--schiefer-hell); }
+  .plan-detail.leer .detail-unten { grid-template-columns: minmax(0, 1fr); }
+  .plan-detail.leer #plan-karte { height: clamp(320px, 56vh, 620px); }
+  .plan-detail.leer #etappen { display: none; }
+  .detail-abschnitt { margin-top: 18px; }
+  .detail-abschnitt h3 { font-size: 12px; font-weight: 500; color: var(--leise); text-transform: uppercase; letter-spacing: .06em; margin: 0 0 4px; }
+  .stopps { list-style: none; padding: 0; margin: 0; }
+  .stopps > li { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 8px; padding: 10px 0; border-top: 1px solid var(--linie); }
   .stopp-nr { width: 28px; height: 28px; border-radius: 50%; color: #fff; display: inline-grid; place-items: center; font-weight: 700; font-size: 13px; flex: none; }
   .stopp-nr.klein { width: 22px; height: 22px; font-size: 12px; }
   .stopp-kopf { font-weight: 500; }
   .stopp-kopf small { color: var(--leise); font-weight: 400; }
   .geraet-zeile { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13px; margin-top: 6px; }
   .geraet-zeile select { padding: 6px 8px; border: 1px solid var(--linie); border-radius: 8px; background: #fff; font-size: 13px; min-height: 36px; color: var(--schiefer); }
-  .begruendung { list-style: none; padding: 0; margin: 10px 0 0; font-size: 13px; }
-  .begruendung li { padding: 3px 0 3px 18px; position: relative; color: var(--schiefer); line-height: 1.4; }
-  .begruendung li::before { content: ''; position: absolute; left: 4px; top: 9px; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+  .begruendung { list-style: none; padding: 0; margin: 0; font-size: 13px; }
+  .begruendung li { padding: 4px 0 4px 18px; position: relative; color: var(--schiefer); line-height: 1.45; }
+  .begruendung li::before { content: ''; position: absolute; left: 4px; top: 10px; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
   .begruendung li.info::before { background: var(--blau); }
-  .spedkarte { border: 1px dashed var(--warn); border-radius: 14px; padding: 10px 14px; margin-bottom: 12px; font-size: 13px; }
-  .karte-panel { position: sticky; top: 0; max-height: calc(100vh - 150px); overflow-y: auto; } /* bleibt beim Rollen stehen und ganz im Bild */
-  .karte-panel h2 { margin: 0 0 10px; }
-  #plan-karte { height: clamp(240px, 34vh, 420px); border-radius: 12px; overflow: hidden; background: var(--schiefer-hell); }
-  .fahrt-wahl { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-  .fahrt-wahl:empty { display: none; }
-  .fahrt-chip { display: inline-flex; align-items: baseline; gap: 6px; border: 1px solid var(--linie); background: #fff; border-radius: 10px; padding: 5px 9px; min-height: 34px; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--text); }
-  .fahrt-chip small { color: var(--leise); font-size: 11px; font-weight: 400; }
-  .fahrt-chip:hover { background: var(--schiefer-hell); }
-  .fahrt-chip[aria-pressed="true"] { background: var(--text); border-color: var(--text); color: #fff; }
-  .fahrt-chip[aria-pressed="true"] small { color: rgba(255,255,255,.75); }
-  #etappen > .hinweis { margin: 10px 0 0; }
-  .etappen { list-style: none; padding: 0; margin: 10px 0 0; border-top: 1px solid var(--linie); }
+  #etappen > .hinweis { margin: 0; }
+  .etappen { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--linie); }
   .etappe { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 10px; align-items: center; width: 100%; min-height: 48px; padding: 8px 8px; border: none; border-bottom: 1px solid var(--linie); background: none; text-align: left; cursor: pointer; color: var(--text); }
   .etappe .stopp-nr { justify-self: center; width: auto; min-width: 22px; padding: 0 6px; border-radius: 11px; }
   .etappe:hover { background: var(--schiefer-hell); }
@@ -157,6 +185,7 @@
   .etappe small { display: block; color: var(--leise); font-size: 12px; line-height: 1.35; margin-top: 1px; }
   .etappe-zeit { text-align: right; white-space: nowrap; font-size: 13px; font-variant-numeric: tabular-nums; }
   .etappen-fuss { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 8px 0 0; }
+  .karten-punkt { background: var(--text); color: #fff; border-radius: 12px; padding: 3px 9px; font-size: 12px; font-weight: 500; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,.3); white-space: nowrap; }
   .karten-stopp { color: #fff; border-radius: 14px; padding: 3px 10px 3px 4px; font-weight: 500; font-size: 12px; display: flex; gap: 6px; align-items: center; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,.3); white-space: nowrap; }
   .karten-stopp b { background: rgba(255,255,255,.25); border-radius: 10px; min-width: 20px; height: 20px; padding: 0 5px; display: grid; place-items: center; }
   .karten-hof { background: var(--orange); color: #fff; border-radius: 8px; padding: 3px 8px; font-size: 12px; font-weight: 700; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
@@ -289,6 +318,7 @@
     #druck table { font-size: 10pt; }
     #druck th { background: #eee; }
     #druck .klein { font-size: 9pt; color: #444; }
+    #druck .druck-bild { display: block; width: 100%; max-height: 7cm; object-fit: contain; margin: 2pt 0 6pt; break-inside: avoid; }
   }
   dl.daten { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 13px; }
   dl.daten dt { color: var(--leise); }
@@ -315,10 +345,16 @@
   .rg-fuss { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .rg-fuss .rg-zahl { margin-right: auto; color: var(--leise); font-size: 12px; }
 
+  @media (max-width: 1180px) {
+    .detail-unten { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 980px) { /* iPad hochkant und kleiner: Liste über dem Detail, die Seite rollt als Ganzes */
+    #v-planen { overflow: auto; }
+    .planen { grid-template-columns: minmax(0, 1fr); height: auto; }
+    .plan-liste { border-right: none; border-bottom: 1px solid var(--linie); overflow: visible; }
+    .plan-detail { overflow: visible; }
+  }
   @media (max-width: 1100px) {
-    .planen { grid-template-columns: minmax(0, 1fr); }
-    .karte-panel { position: static; order: -1; max-height: none; overflow: visible; }
-    #plan-karte { height: 340px; }
     .kopf .logo { height: 22px; }
   }
   @media (max-width: 900px) and (min-width: 701px) {
@@ -370,20 +406,32 @@
 
   <div class="haupt">
 
-    <section id="v-planen" class="ansicht seite panel">
-      <h1 id="plan-titel">Planen</h1>
-      <p class="untertitel">Welche Geräte müssen raus, und wie kommen sie auf die Lkw? Das System prüft jede sinnvolle Ladevariante und begründet seine Wahl.</p>
+    <section id="v-planen" class="ansicht panel">
       <div class="planen">
-        <div>
+        <!-- links: Transporte des Tages, nach dem Berechnen die Fahrten -->
+        <div class="plan-liste">
+          <h1 id="plan-titel">Planen</h1>
+          <p class="plan-datum" id="plan-datum"></p>
           <div id="plan-auftraege"></div>
-          <div id="plan-ergebnis"></div>
+          <div id="plan-ergebnis" class="plan-aktionen"></div>
         </div>
-        <aside class="karte-panel" aria-label="Route der gewählten Fahrt">
-          <h2 id="karte-titel">Karte</h2>
-          <div class="fahrt-wahl" id="fahrt-wahl" role="group" aria-label="Fahrt wählen"></div>
-          <div id="plan-karte"></div>
-          <div id="etappen"></div>
-        </aside>
+        <!-- rechts: die gewählte Fahrt (vor dem Berechnen die Kunden des Tages auf der Karte) -->
+        <div class="plan-detail" aria-live="polite">
+          <div id="detail-kopf"></div>
+          <div class="detail-3d" id="detail-3d" hidden>
+            <div id="plan-3d"></div>
+            <div class="plan-reiter klein" id="rechts-richtung" role="tablist" aria-label="Ladung zeigen" hidden>
+              <button role="tab" data-richtung="hin" aria-selected="true">Abfahrt am Hof</button>
+              <button role="tab" data-richtung="rueck" aria-selected="false">Rückweg</button>
+            </div>
+            <span class="detail-3d-hinweis">Ziehen zum Drehen</span>
+          </div>
+          <div class="detail-unten">
+            <div class="detail-karte"><div id="plan-karte"></div></div>
+            <div id="etappen"></div>
+          </div>
+          <div id="detail-inhalt"></div>
+        </div>
       </div>
     </section>
 

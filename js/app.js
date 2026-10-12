@@ -43,7 +43,7 @@ let meldung = null; // { art: 'ok' | 'warn', text, woche }
 const offeneAuftraege = () => stand.alleAuftraege.filter((a) => a.tag === datum);
 const wann = () => (datum === tagPlus(HEUTE, 1) ? 'morgen' : datum === HEUTE ? 'heute' : `am ${tagLang(datum)}`);
 const kmSumme = (p) => p.touren.reduce((s, t) => s + t.km, 0);
-function planZuruecksetzen() { plan = null; vorschlag = null; planGewaehlt = 0; }
+function planZuruecksetzen() { plan = null; vorschlag = null; planGewaehlt = 0; richtung3d = 'hin'; etappe = null; }
 // die Fahrt mit den meisten Stopps zuerst auf der Karte
 const standardAuswahl = (p) => p.touren.reduce((b, t, i, l) => (t.halte.length > l[b].halte.length ? i : b), 0);
 function planBerechnen() {
@@ -56,38 +56,142 @@ function planBerechnen() {
 
 const artWort = (a) => (istAbholung(a) ? 'abholen' : 'ausliefern');
 const halteFuerLadeplan = (halte) => halte.map((h) => ({ ort: h.ort, art: h.art, geraete: h.auftraege.map((a) => a.geraet) }));
+// Links: vor dem Berechnen die Transporte des Tages (nach Frist), danach Ergebnis und Fahrten; unten die Knöpfe.
+// Rechts (renderDetail): die gewählte Fahrt, vor dem Berechnen die Kunden des Tages auf der Karte.
+const fristVon = (a) => (istAbholung(a) ? a.ab : a.bis);
+function auftragZeile(a) {
+  const g = finde(GERAETE, a.geraet);
+  return el('li', { class: 'auftrag-zeile', 'data-auftrag': a.id, 'data-art': a.art }, el('i', { class: 'art-strich', 'aria-hidden': 'true' }),
+    el('span', {}, el('b', {}, g.name), el('small', {}, ortName(a.ort))),
+    el('span', { class: 'zeit' }, istAbholung(a) ? `${hhmm(a.ab)}–${hhmm(a.bis)} Uhr` : `bis ${hhmm(a.bis)} Uhr`, el('small', {}, artWort(a))),
+    el('button', { class: 'x klein', 'aria-label': `${g.kurz} ${artWort(a)} bei ${ortName(a.ort)} entfernen`, title: 'Transport entfernen', onclick: () => auftragEntfernen(a.id) }, icon('schliessen')));
+}
 function renderPlanen() {
-  const auftraege = offeneAuftraege(), gesperrt = istSonntag(datum) || datum < HEUTE;
-  $('#plan-titel').textContent = `Planen · ${tagLang(datum)}`;
+  const auftraege = [...offeneAuftraege()].sort((x, y) => fristVon(x) - fristVon(y)), gesperrt = istSonntag(datum) || datum < HEUTE;
+  $('#plan-datum').textContent = tagLang(datum);
   const ab = auftraege.filter(istAbholung).length, kunden = new Set(auftraege.map((a) => a.ort)).size;
-  const inhalt = [el('h2', {}, auftraege.length ? `${auftraege.length} Transporte ${wann()}: ${auftraege.length - ab} ausliefern, ${ab} abholen · ${kunden} Kunden` : `Keine offenen Transporte ${wann()}`)];
-  if (auftraege.length) {
-    inhalt.push(el('ul', { class: 'auftraege' }, ...auftraege.map((a) => {
-      const g = finde(GERAETE, a.geraet);
-      return el('li', { 'data-auftrag': a.id, 'data-art': a.art }, el('i', { class: 'farbpunkt', style: `background:${g.farbe}` }),
-        el('span', {}, el('b', {}, g.name), el('small', {}, ortName(a.ort)), el('small', {}, marke(artWort(a), istAbholung(a) ? 'unterwegs' : 'frei'), ' ', el('span', { class: 'frist' }, istAbholung(a) ? `${hhmm(a.ab)}–${hhmm(a.bis)} Uhr` : `bis ${hhmm(a.bis)} Uhr`))),
-        el('button', { class: 'x klein', 'aria-label': `${g.kurz} ${artWort(a)} bei ${ortName(a.ort)} entfernen`, title: 'Transport entfernen', onclick: () => auftragEntfernen(a.id) }, icon('schliessen')));
-    })));
-    if (istSonntag(datum)) inhalt.push(el('p', { class: 'g-nein' }, 'Sonntags wird nicht gefahren (Lkw-Fahrverbot).'));
+  const hinweis = meldung ? el('p', { class: 'meldung' + (meldung.art === 'warn' ? ' warn' : ''), id: 'plan-meldung', role: 'status' }, meldung.text,
+    ...(meldung.woche ? [' ', knopf('In der Woche ansehen', { class: 'knopf zweit klein' }, zurWoche)] : [])) : null;
+  const links = [];
+  if (plan) {
+    links.push(ergebnisKopf(), hinweis, el('h2', { class: 'liste-titel' }, `${plan.touren.length} Fahrten`),
+      ...plan.touren.map(fahrtZeile));
+    if (plan.spedition.length) {
+      links.push(el('h2', { class: 'liste-titel' }, `${plan.spedition.length} an Spedition`), ...plan.spedition.map((s) => {
+        const g = finde(GERAETE, s.auftrag.geraet);
+        return el('div', { class: 'sped-zeile', 'data-spedition': s.auftrag.id }, el('b', {}, g.name), ` ${artWort(s.auftrag)} · ${ortKurz(s.auftrag.ort)}`,
+          el('small', {}, `${s.grund} · ca. ${euro(kostenSpedition(s.auftrag))}`), geraetZeile(s.auftrag, null));
+      }));
+    }
+    links.push(el('details', { class: 'offen-klapp' }, el('summary', {}, `Alle ${auftraege.length} Transporte ${wann()}`), el('ul', { class: 'zeilen' }, ...auftraege.map(auftragZeile))));
+  } else if (auftraege.length) {
+    links.push(el('p', { class: 'ergebnis-text', id: 'plan-zahl' }, `${auftraege.length} Transporte ${wann()}: ${auftraege.length - ab} ausliefern, ${ab} abholen, ${kunden} Kunden.`),
+      hinweis, el('ul', { class: 'zeilen', id: 'auftrag-liste' }, ...auftraege.map(auftragZeile)));
+    if (istSonntag(datum)) links.push(el('p', { class: 'g-nein' }, 'Sonntags wird nicht gefahren (Lkw-Fahrverbot).'));
   } else {
     const eingeplant = stand.touren.some((t) => t.stopps);
-    inhalt.push(el('p', { class: 'hinweis' }, eingeplant ? 'Für diesen Tag ist alles eingeplant. Die Touren stehen in der Woche.' : 'Für diesen Tag liegen keine offenen Transporte vor.'));
+    links.push(hinweis, el('p', { class: 'hinweis' }, eingeplant ? 'Für diesen Tag ist alles eingeplant. Die Touren stehen in der Woche.' : `Keine offenen Transporte ${wann()}.`));
   }
   const kaputt = stand.werkstatt.filter((w) => w.tag === datum);
   if (kaputt.length) {
-    inhalt.push(el('p', { class: 'werkstatt-hinweis' }, 'In der Werkstatt: ', ...kaputt.flatMap((w) => [`${finde(LKW, w.lkw).kz} `,
+    links.push(el('p', { class: 'werkstatt-hinweis' }, 'In der Werkstatt: ', ...kaputt.flatMap((w) => [`${finde(LKW, w.lkw).kz} `,
       knopf('zurückholen', { class: 'knopf zweit klein', 'data-zurueckholen': w.lkw }, () => werkstattSetzen(w.lkw, false)), ' '])));
   }
-  const reihe = el('div', { class: 'knopfreihe' });
-  if (auftraege.length) reihe.append(knopf(plan ? 'Neu berechnen' : 'Beladung berechnen', { class: 'knopf gross', id: 'beladung-berechnen' }, planBerechnen, gesperrt));
-  if (!gesperrt) reihe.append(knopf('Neuer Transport', { class: 'knopf zweit gross', id: 'neuer-transport' }, () => transportOeffnen()));
-  if (!auftraege.length && stand.touren.some((t) => t.stopps)) reihe.append(knopf('In der Woche ansehen', { class: 'knopf zweit' }, zurWoche));
+  $('#plan-auftraege').replaceChildren(...links.filter(Boolean));
+
+  const knoepfe = [];
+  if (plan) knoepfe.push(knopf('Plan übernehmen', { class: 'knopf gross', id: 'plan-uebernehmen' }, planUebernehmen));
+  if (auftraege.length) knoepfe.push(knopf(plan ? 'Neu berechnen' : 'Beladung berechnen', { class: plan ? 'knopf zweit' : 'knopf gross', id: 'beladung-berechnen' }, planBerechnen, gesperrt));
+  if (!gesperrt) knoepfe.push(knopf('Neuer Transport', { class: plan || auftraege.length ? 'knopf zweit' : 'knopf', id: 'neuer-transport' }, () => transportOeffnen()));
+  if (!auftraege.length && stand.touren.some((t) => t.stopps)) knoepfe.push(knopf('In der Woche ansehen', { class: 'knopf zweit' }, zurWoche));
   if (!auftraege.length && datum !== ladetag() && stand.alleAuftraege.some((a) => a.tag === ladetag())) {
-    reihe.append(knopf(`Zum Beispieltag (${tagKurz(ladetag())})`, { class: 'knopf' }, () => datumSetzen(ladetag())));
+    knoepfe.push(knopf(`Zum Beispieltag (${tagKurz(ladetag())})`, { class: 'knopf' }, () => datumSetzen(ladetag())));
   }
-  inhalt.push(reihe);
-  $('#plan-auftraege').replaceChildren(...inhalt);
-  renderErgebnis();
+  $('#plan-ergebnis').replaceChildren(...knoepfe);
+  $('#plan-ergebnis').hidden = !knoepfe.length;
+  renderDetail();
+}
+// Plan, Umlegen und Wiederherstellen rufen renderErgebnis: die ganze Seite folgt dem Plan
+function renderErgebnis() { renderPlanen(); }
+
+function ergebnisKopf() {
+  const n = plan.touren.reduce((s, t) => s + t.auftraege.length, 0) + plan.spedition.length;
+  const kosten = plan.touren.reduce((s, t) => s + t.kosten, 0) + plan.spedition.reduce((s, x) => s + kostenSpedition(x.auftrag), 0);
+  const geaendert = plan !== vorschlag;
+  const kachel = (wert, text) => el('div', { class: 'zahl-kachel' }, el('b', {}, String(wert)), el('small', {}, text));
+  return el('div', { id: 'plan-pruef' },
+    el('div', { class: 'zahlen' }, kachel(plan.touren.length, plan.touren.length === 1 ? 'eigener Lkw' : 'eigene Lkw'), kachel(plan.spedition.length, 'an Spedition'), kachel(euro(kosten), 'Kosten ca.')),
+    el('p', { class: 'ergebnis-text' }, `${n} Transporte: ${plan.varianten} Ladevarianten geprüft, jede gegen ${REGELN_ANZAHL} Regeln, dazu Abholfenster sowie Pausen- und Lenkzeiten der Fahrer. `
+      + `Statt ${n} Einzelfahrten reichen ${plan.touren.length} Fahrten.`
+      + (plan.vollstaendig ? '' : ' Die Suche wurde nach 1,5 Sekunden beendet: Das ist die beste bis dahin gefundene Verteilung.')),
+    geaendert ? el('p', { class: 'ergebnis-text geaendert' }, `Von Hand geändert: ${plan.touren.length} Lkw, ${kmSumme(plan)} km. Der Vorschlag hatte ${vorschlag.touren.length} Lkw, ${kmSumme(vorschlag)} km. `,
+      knopf('Vorschlag wiederherstellen', { class: 'knopf zweit klein', id: 'vorschlag-zurueck' }, () => { plan = vorschlag; planGewaehlt = standardAuswahl(plan); meldung = null; renderPlanen(); })) : null);
+}
+function fahrtZeile(t, i) {
+  const gewaehlt = i === planGewaehlt;
+  return el('button', { class: 'fahrt-zeile', 'aria-pressed': String(gewaehlt), 'data-fahrt': t.lkw.id, 'data-stopps': String(t.halte.length),
+    onclick: () => { planGewaehlt = i; renderPlanen(); } },
+  el('span', { class: 'fz-kopf' }, el('b', {}, t.lkw.kz), el('small', {}, t.lkw.typ), el('span', { class: 'fz-zeit' }, `${hhmm(t.start)}–${hhmm(t.ende)}`)),
+  el('span', { class: 'fz-stopps' }, ...t.halte.map((h, k) => el('span', {}, el('span', { class: 'stopp-nr klein', style: `background:${stoppFarbe(k)}` }, String(k + 1)),
+    `${ortKurz(h.ort)}${h.art === 'Abholung' ? ' (abholen)' : ''}`))),
+  el('span', { class: 'fz-info' }, `${t.auftraege.length} ${t.auftraege.length === 1 ? 'Gerät' : 'Geräte'} · ${t.km} km · ${t.fahrer.name}`));
+}
+
+let etappe = null; // { t, i }: gewählte Etappe i der Fahrt t
+let richtung3d = 'hin'; // bei gemischten Fahrten: Ladung bei Abfahrt am Hof oder auf dem Rückweg
+function renderDetail() {
+  const t = plan?.touren[planGewaehlt], warLeer = $('.plan-detail').classList.contains('leer');
+  $('.plan-detail').classList.toggle('leer', !t);
+  $('#detail-3d').hidden = !t;
+  if (warLeer !== !t) karte?.resize(); // die Karte hat jetzt eine andere Höhe; vor dem Einpassen neu messen
+  if (!t) {
+    const auftraege = offeneAuftraege(), orte = [...new Set(auftraege.map((a) => a.ort))];
+    const text = plan ? 'Alle Transporte gehen an die Spedition, kein eigener Lkw fährt.'
+      : auftraege.length ? `Auf der Karte stehen die Kunden ${wann()}. „Beladung berechnen“ verteilt die ${auftraege.length} Geräte auf die freien Lkw: passend nach Gewicht, Maßen, Rampe und Zurrpunkten, pünktlich und mit möglichst wenigen Fahrten.`
+        : 'Für diesen Tag gibt es nichts zu verteilen.';
+    $('#detail-kopf').replaceChildren(el('div', { class: 'detail-leer' }, el('h2', {}, auftraege.length && !plan ? `${orte.length} Kunden, ${auftraege.length} Geräte` : 'Keine Fahrt'), el('p', {}, text)));
+    $('#etappen').replaceChildren();
+    $('#detail-inhalt').replaceChildren();
+    karteZeigen(orte, null, true);
+    return;
+  }
+  const l = t.lkw;
+  $('#detail-kopf').replaceChildren(el('div', { class: 'detail-kopf', 'data-lkw': l.id },
+    el('div', {}, el('h2', {}, l.kz, el('small', {}, l.typ)),
+      el('p', {}, `${t.fahrer.name} · ${hhmm(t.start)}–${hhmm(t.ende)} Uhr · ${t.km} km · ${t.auftraege.length} ${t.auftraege.length === 1 ? 'Gerät' : 'Geräte'}`)),
+    el('div', { class: 'knopfreihe' },
+      knopf('Im Ladeplan öffnen', { class: 'knopf zweit klein', 'data-ladeplan': l.id }, () => ladeplanOeffnen(l.id, halteFuerLadeplan(t.halte), true)),
+      knopf('Ladeliste drucken', { class: 'knopf zweit klein', 'data-ladeliste': l.id }, () => ladelisteDrucken(t, datum)),
+      knopf('Lkw fällt aus', { class: 'knopf zweit klein', 'data-ausfall': l.id }, () => werkstattSetzen(l.id, true)))));
+
+  const teile = ladungTeile(t);
+  if (!teile.some((x) => x.richtung === richtung3d)) richtung3d = teile[0]?.richtung || 'hin';
+  $('#rechts-richtung').hidden = teile.length < 2;
+  document.querySelectorAll('#rechts-richtung [data-richtung]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.richtung === richtung3d)));
+  if (teile.length) planDreiZeigen(l, teile.find((x) => x.richtung === richtung3d).plaetze);
+
+  const aktiv = etappe?.t === t ? etappe.i : null, waehlen = (i) => { etappe = i === null ? null : { t, i }; renderDetail(); };
+  const liste = etappenVon(t);
+  $('#etappen').replaceChildren(
+    el('ol', { class: 'etappen' }, ...liste.map((e, i) => el('li', {}, el('button', { class: 'etappe', 'aria-pressed': String(aktiv === i), 'data-etappe': String(i),
+      onclick: () => waehlen(aktiv === i ? null : i) },
+    el('span', { class: 'stopp-nr klein', style: `background:${e.nummern.length ? stoppFarbe(e.nummern[0] - 1) : 'var(--orange)'}` }, e.nummern.length ? e.nummern.join(' · ') : 'H'),
+    el('span', {}, el('b', {}, `${ortKurz2(e.von)} → ${ortKurz2(e.nach)}`), el('small', {}, e.text)),
+    el('span', { class: 'etappe-zeit' }, `${hhmm(e.ab)}–${hhmm(e.an)}`, el('small', {}, `${e.km} km`)))))),
+    el('p', { class: 'hinweis etappen-fuss' }, aktiv === null ? 'Eine Etappe antippen, um ihre Strecke auf der Karte hervorzuheben.'
+      : knopf('Ganze Fahrt zeigen', { class: 'knopf zweit klein', id: 'ganze-fahrt' }, () => waehlen(null))));
+  karteZeigen(t.halte.map((h) => h.ort), aktiv === null ? null : liste[aktiv].nr);
+
+  $('#detail-inhalt').replaceChildren(
+    el('section', { class: 'detail-abschnitt' }, el('h3', {}, 'Stopps und Geräte'),
+      el('ol', { class: 'stopps' }, ...t.halte.map((h, k) => el('li', { 'data-art': h.art },
+        el('span', { class: 'stopp-nr', style: `background:${stoppFarbe(k)}` }, String(k + 1)),
+        el('div', {},
+          el('div', { class: 'stopp-kopf' }, ortName(h.ort), ' ', marke(h.art === 'Abholung' ? 'aufladen' : 'abladen', h.art === 'Abholung' ? 'unterwegs' : 'frei'), ' ',
+            el('small', {}, `an ${hhmm(h.ankunft)} Uhr, ${fristText(h.auftraege.reduce((m, a) => (a.bis < m.bis ? a : m)))}`)),
+          ...h.auftraege.map((a) => geraetZeile(a, l.id))))))),
+    el('section', { class: 'detail-abschnitt' }, el('h3', {}, 'Warum so'),
+      el('ul', { class: 'begruendung' }, ...begruendungen(t).map(([art, txt]) => el('li', { class: art }, txt)))));
 }
 function zurWoche() { waehleAnsicht('plantafel'); planReiter('tag'); }
 
@@ -113,62 +217,13 @@ function werkstattSetzen(lkwId, an) {
   allesNeu();
 }
 
-function renderErgebnis() {
-  const box = $('#plan-ergebnis');
-  const hinweis = meldung ? el('p', { class: 'meldung' + (meldung.art === 'warn' ? ' warn' : ''), id: 'plan-meldung', role: 'status' }, meldung.text,
-    ...(meldung.woche ? [' ', knopf('In der Woche ansehen', { class: 'knopf zweit klein' }, zurWoche)] : [])) : null;
-  if (!plan) {
-    box.replaceChildren(...(hinweis ? [hinweis] : []));
-    renderRoute();
-    return;
-  }
-  const n = plan.touren.reduce((s, t) => s + t.auftraege.length, 0) + plan.spedition.length;
-  const kosten = plan.touren.reduce((s, t) => s + t.kosten, 0) + plan.spedition.reduce((s, x) => s + kostenSpedition(x.auftrag), 0);
-  const geaendert = plan !== vorschlag;
-  const teile = [el('div', { class: 'pruefzeile' + (geaendert ? ' geaendert' : ''), id: 'plan-pruef' },
-    el('b', {}, `${n} Transporte auf ${plan.touren.length} Lkw${plan.spedition.length ? `, ${plan.spedition.length} an Spedition` : ''}`), el('br'),
-    `${plan.varianten} Ladevarianten geprüft, jede gegen ${REGELN_ANZAHL} Regeln, dazu Abholfenster sowie Pausen- und Lenkzeiten der Fahrer. `
-      + `Statt ${n} Einzelfahrten reichen ${plan.touren.length} Fahrten, Kosten ca. ${euro(kosten)}.`,
-    ...(plan.vollstaendig ? [] : [el('br'), 'Die Suche wurde nach 1,5 Sekunden beendet: Das ist die beste bis dahin gefundene Verteilung.']),
-    ...(geaendert ? [el('br'), `Von Hand geändert: ${plan.touren.length} Lkw, ${kmSumme(plan)} km. Der Vorschlag hatte ${vorschlag.touren.length} Lkw, ${kmSumme(vorschlag)} km. `,
-      knopf('Vorschlag wiederherstellen', { class: 'knopf zweit klein', id: 'vorschlag-zurueck' }, () => { plan = vorschlag; planGewaehlt = standardAuswahl(plan); meldung = null; renderErgebnis(); })] : []))];
-  if (hinweis) teile.push(hinweis);
-  teile.push(...plan.touren.map(tourKarte));
-  teile.push(...plan.spedition.map((s) => {
-    const g = finde(GERAETE, s.auftrag.geraet);
-    return el('div', { class: 'spedkarte', 'data-spedition': s.auftrag.id }, el('strong', {}, `An Spedition: ${g.name} ${artWort(s.auftrag)} bei ${ortName(s.auftrag.ort)}`),
-      el('div', {}, `Grund: ${s.grund} · ca. ${euro(kostenSpedition(s.auftrag))}`), geraetZeile(s.auftrag, null));
-  }));
-  teile.push(el('div', { class: 'knopfreihe' }, knopf('Plan übernehmen', { class: 'knopf gross', id: 'plan-uebernehmen' }, planUebernehmen)));
-  box.replaceChildren(...teile);
-  renderRoute();
-}
-
-// Rechts: Fahrt wählen, Karte und die Etappen der gewählten Fahrt (Hof → Stopp 1 → … → Hof).
-// Ein Klick auf eine Etappe hebt ihre Strecke auf der Karte hervor, ein zweiter Klick zeigt wieder die ganze Fahrt.
-let etappe = null; // { t, i }: gewählte Etappe i der Fahrt t
-function renderRoute() {
-  const t = plan?.touren[planGewaehlt];
-  $('#fahrt-wahl').replaceChildren(...(plan ? plan.touren.map((u, i) => el('button', { class: 'fahrt-chip', 'aria-pressed': String(i === planGewaehlt), 'data-fahrt': u.lkw.id,
-    onclick: () => { planGewaehlt = i; renderErgebnis(); } }, u.lkw.kz, el('small', {}, `${u.halte.length} Stopp${u.halte.length > 1 ? 's' : ''}`))) : []));
-  if (!t) {
-    $('#karte-titel').textContent = 'Karte';
-    $('#etappen').replaceChildren(el('p', { class: 'hinweis' }, 'Nach dem Berechnen steht hier jede Fahrt Etappe für Etappe.'));
-    karteZeigen([]);
-    return;
-  }
-  const aktiv = etappe?.t === t ? etappe.i : null, waehlen = (i) => { etappe = i === null ? null : { t, i }; renderRoute(); };
-  const liste = etappenVon(t);
-  $('#karte-titel').textContent = `Route · ${t.lkw.kz}`;
-  $('#etappen').replaceChildren(
-    el('ol', { class: 'etappen' }, ...liste.map((e, i) => el('li', {}, el('button', { class: 'etappe', 'aria-pressed': String(aktiv === i), 'data-etappe': String(i),
-      onclick: () => waehlen(aktiv === i ? null : i) },
-    el('span', { class: 'stopp-nr klein', style: `background:${e.nummern.length ? stoppFarbe(e.nummern[0] - 1) : 'var(--orange)'}` }, e.nummern.length ? e.nummern.join(' · ') : 'H'),
-    el('span', {}, el('b', {}, `${ortKurz2(e.von)} → ${ortKurz2(e.nach)}`), el('small', {}, e.text)),
-    el('span', { class: 'etappe-zeit' }, `${hhmm(e.ab)}–${hhmm(e.an)}`, el('small', {}, `${e.km} km`)))))),
-    el('p', { class: 'hinweis etappen-fuss' }, `Ganze Fahrt ${hhmm(t.start)}–${hhmm(t.ende)} Uhr, ${t.km} km. `,
-      aktiv === null ? 'Eine Etappe anklicken, um ihre Strecke hervorzuheben.' : knopf('Ganze Fahrt zeigen', { class: 'knopf zweit klein', id: 'ganze-fahrt' }, () => waehlen(null))));
-  karteZeigen(t.halte.map((h) => h.ort), aktiv === null ? null : liste[aktiv].nr);
+// Ladung der gewählten Fahrt rechts in 3D zum Drehen, Schilder mit Stoppnummer wie in der Liste und auf der Karte
+const planBlick = { winkel: -0.85, neigung: 0.55, abstand: 13.5 };
+let planDrei = null;
+function planDreiZeigen(l, plaetze) {
+  if (!planDrei) planDrei = betrachter($('#plan-3d'), planBlick);
+  if (!planDrei) { $('#plan-3d').replaceChildren(el('div', { class: 'karten-fehler' }, '3D-Ansicht nicht verfügbar (three.js oder WebGL fehlt).')); return; }
+  szeneFuellen(planDrei, ladungGruppe(l, plaetze, stoppSchild, false, false)); // ohne 4-m-Ebene ruhiger; die Höhe prüft der Ladeplan
 }
 // Etappen einer Fahrt: je Fahrt-Abschnitt Start, Ziel, Zeit, km und was danach am Ziel passiert (Warten, Pause, Ab- oder Aufladen).
 // Bleibt der Lkw am Ort (ausliefern und abholen beim selben Kunden), gehört der zweite Stopp zur selben Etappe; nr zählt die Abschnitte für die Karte.
@@ -191,24 +246,9 @@ function etappenVon(t) {
     : p.typ === 'pause' ? `Pause ${hhmm(p.von)}–${hhmm(p.bis)} Uhr` : `${LADEN_WORT[p.text]}: ${geraeteKurz(p.ladung)}`)).join(' · ') || 'zurück am Hof' }));
 }
 
-function tourKarte(t, i) {
-  const l = t.lkw, gewaehlt = i === planGewaehlt;
-  return el('article', { class: 'tourkarte' + (gewaehlt ? ' gewaehlt' : ''), 'data-lkw': l.id, 'data-stopps': String(t.halte.length) },
-    el('button', { class: 'tk-kopf', 'aria-pressed': String(gewaehlt), title: 'Auf der Karte zeigen', onclick: () => { planGewaehlt = i; renderErgebnis(); } },
-      el('span', {}, el('strong', {}, l.kz), ' ', el('small', {}, l.typ)),
-      el('small', {}, `${t.fahrer.name} · ${hhmm(t.start)}–${hhmm(t.ende)} Uhr · ${t.km} km`)),
-    el('ol', { class: 'stopps' }, ...t.halte.map((h, k) => el('li', { 'data-art': h.art },
-      el('span', { class: 'stopp-nr', style: `background:${stoppFarbe(k)}` }, String(k + 1)),
-      el('div', {},
-        el('div', { class: 'stopp-kopf' }, ortName(h.ort), ' ', marke(h.art === 'Abholung' ? 'aufladen' : 'abladen', h.art === 'Abholung' ? 'unterwegs' : 'frei'), ' ',
-          el('small', {}, `an ${hhmm(h.ankunft)} Uhr, ${fristText(h.auftraege.reduce((m, a) => (a.bis < m.bis ? a : m)))}`)),
-        ...h.auftraege.map((a) => geraetZeile(a, l.id)))))),
-    el('ul', { class: 'begruendung' }, ...begruendungen(t).map(([art, txt]) => el('li', { class: art }, txt))),
-    el('div', { class: 'knopfreihe' }, knopf('Im Ladeplan ansehen', { class: 'knopf zweit klein', 'data-ladeplan': l.id },
-      () => ladeplanOeffnen(l.id, halteFuerLadeplan(t.halte), true)),
-    knopf('Ladeliste drucken', { class: 'knopf zweit klein', 'data-ladeliste': l.id }, () => ladelisteDrucken(t, datum)),
-    knopf('Lkw fällt aus', { class: 'knopf zweit klein', 'data-ausfall': l.id }, () => werkstattSetzen(l.id, true))));
-}
+// Teile der Ladung einer Fahrt mit Bild: ab Hof (Auslieferungen) und Rückweg (Abholungen), nur die vorhandenen
+const LADUNG_TEILE = [['hin', 'Abfahrt am Hof', 'plaetze'], ['rueck', 'Rückweg', 'plaetzeRueck']];
+const ladungTeile = (t) => LADUNG_TEILE.filter(([, , feld]) => t[feld]?.length).map(([richtung, titel, feld]) => ({ richtung, titel, plaetze: t[feld] }));
 // Ein Gerät mit Auswahl, um es von Hand auf einen anderen Lkw zu legen
 function geraetZeile(a, lkwId) {
   const g = finde(GERAETE, a.geraet);
@@ -312,17 +352,21 @@ function ladelisteDrucken(t, tag) {
   const tabelle = (plaetze) => el('table', {}, el('tr', {}, ...['Nr.', 'Gerät', 'Gewicht', 'Stopp', 'Stellplatz'].map((x) => el('th', {}, x))),
     ...[...plaetze].sort((x, y) => x.x - y.x).map((p, i) => zelle(String(i + 1), p.g.name, `${zahl(p.g.gewicht, 1)} t`, `${p.stopp + 1} · ${ortKurz(t.halte[p.stopp].ort)}`,
       `${zahl(p.x, 1)} bis ${zahl(p.x + p.g.l, 1)} m (${p.zone.name})`)));
-  $('#druck').replaceChildren(
+  const bild = (plaetze, text) => { const url = ladungBild(l, plaetze, 1400, 420); return url ? el('img', { class: 'druck-bild', src: url, alt: text }) : null; };
+  $('#druck').replaceChildren(...[ // ohne WebGL fehlen die Bilder; replaceChildren würde null als Text einfügen
     el('h1', {}, `Ladeliste ${l.kz} · ${tagLang(tag)}`),
     el('p', {}, `${l.typ} · Fahrer ${t.fahrer.name} · ab Hof ${hhmm(t.start)} Uhr · zurück ca. ${hhmm(t.ende)} Uhr · ${t.km} km`),
-    ...(ladung.hin.length ? [el('h2', {}, 'Am Hof aufladen, in dieser Reihenfolge, jedes Gerät auf seinen Stellplatz (gemessen ab Stirnwand)'), tabelle(ladung.hin)] : []),
-    ...(ladung.rueck.length ? [el('h2', {}, 'Unterwegs aufladen: so stehen die abgeholten Geräte auf dem Rückweg'), tabelle(ladung.rueck)] : []),
+    ...(ladung.hin.length ? [el('h2', {}, 'Am Hof aufladen, in dieser Reihenfolge, jedes Gerät auf seinen Stellplatz (gemessen ab Stirnwand)'),
+      bild(ladung.hin, `3D-Ansicht ${l.kz} bei Abfahrt am Hof`), tabelle(ladung.hin)] : []),
+    ...(ladung.rueck.length ? [el('h2', {}, 'Unterwegs aufladen: so stehen die abgeholten Geräte auf dem Rückweg'),
+      bild(ladung.rueck, `3D-Ansicht ${l.kz} auf dem Rückweg`), tabelle(ladung.rueck)] : []),
     el('h2', {}, 'Stopps'),
     el('ol', {}, ...t.halte.map((h) => el('li', {}, `${adresseText(h.ort)}. An ${hhmm(h.ankunft)} Uhr (${fristText(h.auftraege[0])}): `
       + `${h.auftraege.map((a) => finde(GERAETE, a.geraet).name).join(', ')} ${h.art === 'Abholung' ? 'aufladen' : 'abladen'}`))),
     ...(t.pausen?.length ? [el('p', {}, `Pause: ${t.pausen.map((p) => `${hhmm(p.von)}–${hhmm(p.bis)} Uhr`).join(', ')}`)] : []),
-    el('p', { class: 'klein' }, 'Stellplätze gemessen ab Vorderkante Ladefläche (Stirnwand). Ladungssicherung vor Abfahrt nach den geltenden Vorgaben prüfen. Beispieldaten der Klick-Demo.'));
-  window.print();
+    el('p', { class: 'klein' }, 'Stellplätze gemessen ab Vorderkante Ladefläche (Stirnwand). Ladungssicherung vor Abfahrt nach den geltenden Vorgaben prüfen. Beispieldaten der Klick-Demo.')].filter(Boolean));
+  // erst drucken, wenn die Bilder dekodiert sind, sonst fehlen sie auf dem Blatt
+  Promise.all([...$('#druck').querySelectorAll('img')].map((i) => i.decode().catch(() => {}))).then(() => window.print());
 }
 // gespeicherte Sammeltour in die Form einer geplanten Fahrt bringen
 function fahrtAus(t) { // laden() und kundeSpeichern() sorgen dafür, dass der Fahrplan gespeicherter Touren aufgeht
@@ -847,23 +891,25 @@ function renderFuhrpark() {
 // ---------- Rundgang: kurze Geschichte beim ersten Öffnen, danach über den Knopf ----------
 const RUNDGANG_GESEHEN = 'reiter-dispo-rundgang';
 const RUNDGANG = [
-  { ziel: () => $('#plan-auftraege .auftraege') || $('#plan-auftraege'), titel: () => `${offeneAuftraege().length} Transporte morgen`,
+  { ziel: () => $('#auftrag-liste') || $('#plan-auftraege'), titel: () => `${offeneAuftraege().length} Transporte morgen`,
     text: () => `Auslieferungen zum Mietbeginn und Abholungen zum Mietende bei ${new Set(offeneAuftraege().map((a) => a.ort)).size} Kunden. Jedes Gerät passt nur auf bestimmte Lkw: Rampe, Kante, Zurrpunkte, Breite, Gewicht und Achslast müssen stimmen.` },
   { ziel: () => $('#beladung-berechnen'), titel: () => 'Ein Klick statt Ausprobieren',
     text: () => 'Statt Gerät für Gerät aufzuladen und dann zu merken, dass das dritte nicht mehr passt, rechnet das System alle sinnvollen Ladevarianten durch.' },
   { vorher: () => { if (!plan) planBerechnen(); }, ziel: () => $('#plan-pruef'), titel: () => 'Das wurde geprüft',
     text: () => `${plan.varianten} Ladevarianten, jede gegen ${REGELN_ANZAHL} Regeln, dazu die Pausen- und Lenkzeiten jedes Fahrers. Von Hand ist das nicht zu schaffen.` },
-  { ziel: () => $('.tourkarte[data-stopps="3"]') || $('.tourkarte'), titel: () => 'Ausliefern und auf dem Rückweg abholen',
+  { vorher: () => fahrtWaehlen((t) => t.halte.length === 3), ziel: () => $('.fahrt-zeile[aria-pressed="true"]'), titel: () => 'Ausliefern und auf dem Rückweg abholen',
     text: () => 'Eine Fahrt bringt Geräte zu mehreren Kunden und nimmt auf dem Rückweg ein Gerät mit, dessen Miete endet. Was beim ersten Kunden herunter muss, steht hinten an der Rampe.' },
-  { ziel: () => [...document.querySelectorAll('.begruendung li')].find((li) => li.textContent.includes('Zurrpunkt'))?.closest('.tourkarte') || $('.tourkarte'), titel: () => 'Jede Entscheidung mit Grund',
+  { vorher: () => fahrtWaehlen((t) => begruendungen(t).some(([, txt]) => txt.includes('Zurrpunkt'))), ziel: () => $('#detail-inhalt'), titel: () => 'Jede Entscheidung mit Grund',
     text: () => 'Zum Beispiel, warum ein Gerät nicht mehr mitpasst oder ein freier Lkw nicht taugt, oft wegen der Zurrpunkte. Über „anderer Lkw“ lässt sich jedes Gerät von Hand umlegen, die Prüfung läuft sofort neu.' },
-  { ziel: () => $('.karte-panel'), titel: () => 'Die Route Etappe für Etappe',
-    text: () => 'Oben eine Fahrt wählen, darunter stehen ihre Etappen vom Hof bis zurück, mit Zeit, Kilometern und was ab- oder aufgeladen wird. Ein Klick auf eine Etappe hebt ihre Strecke auf der Karte hervor.' },
-  { ziel: () => $('.tourkarte.gewaehlt [data-ladeplan]') || $('[data-ladeplan]'), titel: () => 'Im 3D-Ladeplan kontrollieren',
-    text: () => 'Zonen, Zurrpunkte, Achslast und Reihenfolge auf einen Blick. Die Ladeliste für den Fahrer gibt es zum Drucken; fällt ein Lkw aus, rechnet der Plan sofort neu.' },
+  { ziel: () => $('.detail-unten'), titel: () => 'Die Route Etappe für Etappe',
+    text: () => 'Links eine Fahrt wählen, hier stehen ihre Etappen vom Hof bis zurück, mit Zeit, Kilometern und was ab- oder aufgeladen wird. Ein Klick auf eine Etappe hebt ihre Strecke auf der Karte hervor.' },
+  { ziel: () => $('#detail-3d'), titel: () => 'Die Ladung in 3D',
+    text: () => 'So steht jedes Gerät auf der Ladefläche, mit Stoppnummer, Zonen und Zurrpunkten; zum Drehen seitlich ziehen. Im Ladeplan lässt sich alles nachprüfen und ändern. Die Ladeliste für den Fahrer gibt es zum Drucken; fällt ein Lkw aus, rechnet der Plan sofort neu.' },
   { ziel: () => $('.marken'), titel: () => 'Made by GOAT code',
     text: () => 'Diesen Rundgang gibt es jederzeit wieder über den Knopf „Rundgang“ oben rechts.' },
 ];
+// Rundgang: die erste Fahrt wählen, auf die bed passt (sonst bleibt die Auswahl)
+function fahrtWaehlen(bed) { const i = plan ? plan.touren.findIndex(bed) : -1; if (i >= 0 && i !== planGewaehlt) { planGewaehlt = i; renderPlanen(); } }
 let rg = null;
 function rundgangStarten() {
   if (datum !== ladetag()) datumSetzen(ladetag());
@@ -956,6 +1002,7 @@ $('#tag-zurueck').addEventListener('click', () => datumSetzen(tagPlus(datum, -1)
 $('#tag-vor').addEventListener('click', () => datumSetzen(tagPlus(datum, 1)));
 $('#tag-heute').addEventListener('click', () => datumSetzen(HEUTE));
 $('#rundgang-knopf').addEventListener('click', rundgangStarten);
+document.querySelectorAll('#rechts-richtung [data-richtung]').forEach((b) => b.addEventListener('click', () => { richtung3d = b.dataset.richtung; renderDetail(); }));
 $('#kunden-neu').addEventListener('click', () => transportOeffnen('neu'));
 $('#kunden-suche').addEventListener('input', (e) => { kf.suche = e.target.value; renderKunden(); });
 document.querySelectorAll('#kunden-filter button').forEach((b) => b.addEventListener('click', () => { kf.filter = b.dataset.filter; renderKunden(); }));

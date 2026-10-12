@@ -28,21 +28,30 @@ function karteAufbauen() {
     karte.addLayer({ id: 'route-rand', type: 'line', source: 'route', layout: { ...linie, 'line-sort-key': aktiv(1, 0) }, paint: { 'line-color': '#ffffff', 'line-width': aktiv(9, 6) } });
     karte.addLayer({ id: 'route', type: 'line', source: 'route', layout: { ...linie, 'line-sort-key': aktiv(1, 0) }, paint: { 'line-color': aktiv('#27a849', '#aab3bb'), 'line-width': aktiv(5, 3) } });
     karteBereit = true;
-    karteZeigen(karteOrte, karteEtappe);
+    karteZeigen(karteOrte, karteEtappe, karteNurPunkte);
   });
 }
 // orte: Orts-IDs der Stopps in Fahrreihenfolge (leer = nur der Hof). Ein Ort mit mehreren Stopps (ausliefern und abholen)
 // bekommt einen Marker mit allen Nummern. etappe: Nummer der hervorgehobenen Etappe (0 = Hof bis erster Stopp), null = ganze Fahrt.
-function karteZeigen(orte, etappe = null) {
-  karteOrte = orte; karteEtappe = etappe;
+// nurPunkte: Kunden des Tages ohne Reihenfolge und ohne Route (vor dem Berechnen).
+let karteNurPunkte = false;
+function karteZeigen(orte, etappe = null, nurPunkte = false) {
+  karteOrte = orte; karteEtappe = etappe; karteNurPunkte = nurPunkte;
   if (!karteBereit) return;
   karteMarker.forEach((m) => m.remove());
   const stellen = [...new Set(orte)].map((o) => ({ o, nummern: orte.map((x, k) => (x === o ? k + 1 : 0)).filter(Boolean) }));
   karteMarker = [
     new maplibregl.Marker({ element: el('div', { class: 'karten-hof' }, 'Hof') }).setLngLat(HOF_PUNKT).addTo(karte),
-    ...stellen.map(({ o, nummern }) => new maplibregl.Marker({ element: el('div', { class: 'karten-stopp', style: `background:${stoppFarbe(nummern[0] - 1)}` },
-      el('b', {}, nummern.join(' · ')), ortKurz(o)) }).setLngLat(punkt(o)).addTo(karte)),
+    ...stellen.map(({ o, nummern }) => new maplibregl.Marker({ element: nurPunkte ? el('div', { class: 'karten-punkt' }, ortKurz(o))
+      : el('div', { class: 'karten-stopp', style: `background:${stoppFarbe(nummern[0] - 1)}` }, el('b', {}, nummern.join(' · ')), ortKurz(o)) }).setLngLat(punkt(o)).addTo(karte)),
   ];
+  if (nurPunkte) {
+    const grenzen = new maplibregl.LngLatBounds(HOF_PUNKT, HOF_PUNKT);
+    orte.forEach((o) => grenzen.extend(punkt(o)));
+    karte.fitBounds(grenzen, { padding: 70, maxZoom: 11, duration: 700 });
+    karte.getSource('route').setData({ type: 'FeatureCollection', features: [] });
+    return;
+  }
   const folge = ['hof', ...orte, 'hof'], teil = etappe === null ? folge : folge.slice(etappe, etappe + 2);
   const grenzen = new maplibregl.LngLatBounds(punkt(teil[0]), punkt(teil[0]));
   teil.forEach((o) => grenzen.extend(punkt(o)));
@@ -52,7 +61,7 @@ function karteZeigen(orte, etappe = null) {
 }
 function karteLinie() {
   const folge = ['hof', ...karteOrte, 'hof'];
-  const features = karteOrte.length ? folge.slice(1).map((o, i) => ({ type: 'Feature', properties: { aktiv: karteEtappe === null || karteEtappe === i },
+  const features = karteOrte.length && !karteNurPunkte ? folge.slice(1).map((o, i) => ({ type: 'Feature', properties: { aktiv: karteEtappe === null || karteEtappe === i },
     geometry: { type: 'LineString', coordinates: routeVon(folge[i], o) } })) : [];
   karte.getSource('route').setData({ type: 'FeatureCollection', features });
 }

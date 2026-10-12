@@ -27,9 +27,10 @@ function richtungSetzen(richtung) {
   if (!lp.stopps.length) { lp.stopps = [[]]; lp.orte = [null]; lp.nummern = [1]; }
 }
 
-function dreiAufbauen() {
+// Drehbare Szene in einer Fläche (Ladeplan, Planen): eigener Renderer, Drehen per Ziehen, Zoomen per Mausrad.
+// blick { winkel, neigung, abstand } gehört dem Aufrufer und wird hier verändert.
+function betrachter(huelle, blick) {
   if (typeof THREE === 'undefined') return null;
-  const huelle = $('#lp-szene');
   let renderer;
   try { renderer = new THREE.WebGLRenderer({ antialias: true }); } catch (e) { return null; }
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
@@ -58,42 +59,84 @@ function dreiAufbauen() {
   const gruppe = new THREE.Group();
   szene.add(gruppe);
 
-  // Drehen per Ziehen, Zoomen per Mausrad
+  const zeichne = () => {
+    const b = huelle.clientWidth || 600, h = huelle.clientHeight || 420;
+    renderer.setSize(b, h, false);
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = h + 'px';
+    kamera.aspect = b / h;
+    kamera.updateProjectionMatrix();
+    const { winkel, neigung, abstand } = blick;
+    kamera.position.set(Math.cos(winkel) * Math.cos(neigung) * abstand, 1.8 + Math.sin(neigung) * abstand, Math.sin(winkel) * Math.cos(neigung) * abstand);
+    kamera.lookAt(0, 1.8, 0);
+    renderer.render(szene, kamera);
+  };
   let zieht = null;
   const c = renderer.domElement;
   c.addEventListener('pointerdown', (e) => { zieht = { x: e.clientX, y: e.clientY }; c.setPointerCapture(e.pointerId); });
   c.addEventListener('pointerup', () => { zieht = null; });
+  c.addEventListener('pointercancel', () => { zieht = null; }); // Finger rollt die Seite (touch-action: pan-y in Planen)
   c.addEventListener('pointermove', (e) => {
     if (!zieht) return;
-    lp.blick.winkel -= (e.clientX - zieht.x) * 0.008;
-    lp.blick.neigung = Math.max(0.05, Math.min(1.45, lp.blick.neigung + (e.clientY - zieht.y) * 0.006));
+    blick.winkel -= (e.clientX - zieht.x) * 0.008;
+    blick.neigung = Math.max(0.05, Math.min(1.45, blick.neigung + (e.clientY - zieht.y) * 0.006));
     zieht = { x: e.clientX, y: e.clientY };
     zeichne();
   });
   c.addEventListener('wheel', (e) => {
     e.preventDefault();
-    lp.blick.abstand = Math.max(8, Math.min(60, lp.blick.abstand * (e.deltaY > 0 ? 1.1 : 0.9)));
+    blick.abstand = Math.max(8, Math.min(60, blick.abstand * (e.deltaY > 0 ? 1.1 : 0.9)));
     zeichne();
   }, { passive: false });
-  window.addEventListener('resize', () => { if (!$('#v-ladeplan').hidden) zeichne(); });
-  return { renderer, szene, kamera, gruppe };
+  window.addEventListener('resize', () => { if (huelle.offsetParent) zeichne(); }); // nur wenn sichtbar
+  return { renderer, szene, kamera, gruppe, zeichne };
+}
+// Szene neu füllen und zeichnen; der alte Inhalt gibt seinen Grafikspeicher frei
+function szeneFuellen(d, inhalt) {
+  freigeben(d.gruppe);
+  d.gruppe.clear();
+  d.gruppe.add(inhalt);
+  d.zeichne();
 }
 
-function zeichne() {
-  const d = lp.drei;
-  if (!d) return;
-  const huelle = $('#lp-szene');
-  const b = huelle.clientWidth || 600, h = huelle.clientHeight || 420;
-  d.renderer.setSize(b, h, false);
-  d.renderer.domElement.style.width = '100%';
-  d.renderer.domElement.style.height = h + 'px';
-  d.kamera.aspect = b / h;
-  d.kamera.updateProjectionMatrix();
-  const { winkel, neigung, abstand } = lp.blick;
-  d.kamera.position.set(Math.cos(winkel) * Math.cos(neigung) * abstand, 1.8 + Math.sin(neigung) * abstand, Math.sin(winkel) * Math.cos(neigung) * abstand);
-  d.kamera.lookAt(0, 1.8, 0);
-  d.renderer.render(d.szene, d.kamera);
+// Lkw mit Geräten an ihren Stellplätzen, Schild über jedem Gerät und der 4-m-Grenze als rote Ebene.
+// beschriftung(p) → [Text, Farbe, Schildbreite in m (optional)]; warn färbt alles rot (Ladung passt nicht); ohne mitGrenze (Standbilder) bleibt das Bild ruhiger.
+function ladungGruppe(l, plaetze, beschriftung, warn = false, mitGrenze = true) {
+  const grp = new THREE.Group();
+  grp.add(lkwModell(l));
+  let kante = -Infinity, stufe = 0; // Schilder, die sich mit dem vorigen überdecken würden, eine Stufe höher
+  for (const p of [...plaetze].sort((a, b) => a.x - b.x)) {
+    const k = geraetKoerper(p.g, warn);
+    k.position.set(p.x + p.g.l / 2, p.zone.hoehe, 0);
+    grp.add(k);
+    const [text, farbe, groesse] = beschriftung(p);
+    const sch = schild(text, warn ? '#c0392b' : farbe, undefined, groesse);
+    const mitte = p.x + p.g.l / 2, b = sch.scale.x;
+    stufe = mitte - b / 2 < kante ? (stufe + 1) % 3 : 0;
+    kante = mitte + b / 2;
+    sch.position.set(mitte, p.zone.hoehe + p.g.h + 0.7 + stufe * (sch.scale.y + 0.15), 0);
+    grp.add(sch);
+  }
+  grp.position.x = -(l.laenge - 2.4) / 2;
+  if (!mitGrenze) return grp;
+  const breite = l.laenge + 4.5;
+  const grenze = new THREE.Mesh(new THREE.PlaneGeometry(breite, 3.6),
+    new THREE.MeshBasicMaterial({ color: '#e53935', transparent: true, opacity: 0.14, side: THREE.DoubleSide, depthWrite: false }));
+  grenze.rotation.x = -Math.PI / 2;
+  grenze.position.set(l.laenge / 2 - 1.2, MAX_HOEHE, 0);
+  grp.add(grenze);
+  const rand = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(breite, 3.6)), new THREE.LineBasicMaterial({ color: '#e53935' }));
+  rand.rotation.x = -Math.PI / 2;
+  rand.position.copy(grenze.position);
+  grp.add(rand);
+  const hs = schild('max. 4,00 m', '#c0392b');
+  hs.position.set(-3.2, MAX_HOEHE + 0.4, 0);
+  grp.add(hs);
+  return grp;
 }
+// Schild mit Stoppnummer der ganzen Fahrt in der Stoppfarbe, wie in der Liste und auf der Karte
+const stoppSchild = (p) => [`${p.stopp + 1} · ${p.g.kurz}`, stoppFarbe(p.stopp)];
+const stoppSchildGross = (p) => [...stoppSchild(p), 4.6]; // Standbilder sind klein, die Schilder sollen lesbar bleiben
 
 function renderLadeplan() {
   const l = finde(LKW, lp.lkw);
@@ -149,39 +192,12 @@ function renderLadeplan() {
   ].filter(Boolean)); // replaceChildren würde null als Text einfügen
 
   // Szene
-  if (!lp.drei) lp.drei = dreiAufbauen();
+  if (!lp.drei) lp.drei = betrachter($('#lp-szene'), lp.blick);
   if (!lp.drei) {
     $('#lp-szene').replaceChildren(el('div', { class: 'karten-fehler' }, '3D-Ansicht nicht verfügbar (three.js oder WebGL fehlt).'));
     return;
   }
-  const grp = lp.drei.gruppe;
-  freigeben(grp); // Grafikspeicher freigeben, sonst wächst er bei jedem Neuaufbau
-  grp.clear();
-  grp.add(lkwModell(l));
-  for (const p of plaetze) {
-    const warn = !passt;
-    const k = geraetKoerper(p.g, warn);
-    k.position.set(p.x + p.g.l / 2, p.zone.hoehe, 0);
-    grp.add(k);
-    const sch = schild(mehrere ? `${nr(p.stopp)} · ${p.g.kurz}` : p.g.kurz, warn ? '#c0392b' : mehrere ? stoppFarbe(nr(p.stopp) - 1) : '#212529');
-    sch.position.set(p.x + p.g.l / 2, p.zone.hoehe + p.g.h + 0.7, 0);
-    grp.add(sch);
-  }
-  const breite = l.laenge + 4.5;
-  const grenze = new THREE.Mesh(new THREE.PlaneGeometry(breite, 3.6),
-    new THREE.MeshBasicMaterial({ color: '#e53935', transparent: true, opacity: 0.14, side: THREE.DoubleSide, depthWrite: false }));
-  grenze.rotation.x = -Math.PI / 2;
-  grenze.position.set(l.laenge / 2 - 1.2, MAX_HOEHE, 0);
-  grp.add(grenze);
-  const rand = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(breite, 3.6)), new THREE.LineBasicMaterial({ color: '#e53935' }));
-  rand.rotation.x = -Math.PI / 2;
-  rand.position.copy(grenze.position);
-  grp.add(rand);
-  const hs = schild('max. 4,00 m', '#c0392b');
-  hs.position.set(-3.2, MAX_HOEHE + 0.4, 0);
-  grp.add(hs);
-  grp.position.x = -(l.laenge - 2.4) / 2;
-  zeichne();
+  szeneFuellen(lp.drei, ladungGruppe(l, plaetze, (p) => (mehrere ? [`${nr(p.stopp)} · ${p.g.kurz}`, stoppFarbe(nr(p.stopp) - 1)] : [p.g.kurz, '#212529']), !passt));
 }
 
 function ladeplanBedienungAufbauen() {
@@ -197,33 +213,71 @@ function ladeplanBedienungAufbauen() {
   document.querySelectorAll('#lp-richtung button').forEach((b) => b.addEventListener('click', () => { richtungSetzen(b.dataset.richtung); renderLadeplan(); }));
 }
 
-// Bild je Lkw für die Steckbriefe: mit einem gemeinsamen Renderer einmal zeichnen und als PNG merken
-const lkwBilder = new Map();
+// Standbilder (Steckbriefe, Tourkarten, Ladeliste): ein gemeinsamer Renderer zeichnet inhalt einmal und liefert ein PNG.
+// blick: Richtung der Kamera vom Ziel aus, als Vielfaches von abstand; ohne abstand wird eingepasst. inhalt wird danach freigegeben.
 let bildRenderer = null;
-function lkwBild(l) {
-  if (lkwBilder.has(l.id)) return lkwBilder.get(l.id);
-  if (typeof THREE === 'undefined') return null;
-  const b = 640, h = 300;
+function standbild(inhalt, b, h, abstand, blick, ziel) {
   if (!bildRenderer) {
-    try { bildRenderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true }); } catch (e) { return null; }
-    bildRenderer.setSize(b, h, false);
+    try { bildRenderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true }); } catch (e) { freigeben(inhalt); return null; }
     bildRenderer.outputEncoding = THREE.sRGBEncoding;
   }
+  bildRenderer.setSize(b, h, false);
   const szene = new THREE.Scene();
   szene.add(new THREE.HemisphereLight(0xffffff, 0xb8c2cf, 1.0));
   const sonne = new THREE.DirectionalLight(0xffffff, 0.8);
   sonne.position.set(-10, 18, 14);
   szene.add(sonne);
-  const modell = lkwModell(l);
-  modell.position.x = -(l.laenge - 2.4) / 2;
-  szene.add(modell);
+  szene.add(inhalt);
   const kamera = new THREE.PerspectiveCamera(30, b / h, 0.1, 200);
-  const abstand = (l.laenge + 3) * 1.55;
-  kamera.position.set(-abstand * 0.45, abstand * 0.32, abstand * 0.82);
-  kamera.lookAt(0.4, 1.0, 0);
+  const stellen = (a) => { kamera.position.set(blick[0] * a + ziel[0], blick[1] * a + ziel[1], blick[2] * a + ziel[2]); kamera.lookAt(...ziel); kamera.updateMatrixWorld(); };
+  if (abstand) {
+    kamera.position.set(blick[0] * abstand, blick[1] * abstand, blick[2] * abstand);
+    kamera.lookAt(...ziel);
+  } else { // einpassen: Abstand so wählen, dass der ganze Inhalt mit etwas Rand ins Bild passt (Halbierungssuche)
+    inhalt.updateMatrixWorld(true);
+    const box = new THREE.Box3(), ecken = []; // Ecken je Bauteil liegen enger am Modell als die Ecken des Gesamtkastens
+    inhalt.traverse((o) => {
+      if (!o.geometry) return;
+      const t = new THREE.Box3().setFromObject(o);
+      box.union(t);
+      for (const x of [t.min.x, t.max.x]) for (const y of [t.min.y, t.max.y]) for (const z of [t.min.z, t.max.z]) ecken.push(new THREE.Vector3(x, y, z));
+    });
+    const c = box.getCenter(new THREE.Vector3());
+    ziel = [c.x, c.y, c.z];
+    let nah = 2, fern = 120;
+    for (let k = 0; k < 24; k++) {
+      const a = (nah + fern) / 2;
+      stellen(a);
+      const passt = ecken.every((e) => { const p = e.clone().project(kamera); return Math.abs(p.x) < 0.94 && Math.abs(p.y) < 0.9 && p.z < 1; });
+      if (passt) fern = a; else nah = a;
+    }
+    stellen(fern);
+  }
   bildRenderer.render(szene, kamera);
   const url = bildRenderer.domElement.toDataURL('image/png');
-  freigeben(modell);
-  lkwBilder.set(l.id, url);
+  freigeben(inhalt);
+  return url;
+}
+// Bild je Lkw für die Steckbriefe, einmal gezeichnet und gemerkt
+const lkwBilder = new Map();
+function lkwBild(l) {
+  if (lkwBilder.has(l.id)) return lkwBilder.get(l.id);
+  if (typeof THREE === 'undefined') return null;
+  const modell = lkwModell(l);
+  modell.position.x = -(l.laenge - 2.4) / 2;
+  const url = standbild(modell, 640, 300, (l.laenge + 3) * 1.55, [-0.45, 0.32, 0.82], [0.4, 1.0, 0]);
+  if (url) lkwBilder.set(l.id, url);
+  return url;
+}
+// Bild eines beladenen Lkw für die Ladeliste: Geräte mit Stoppnummer in der Stoppfarbe. Gemerkt je Ladung und Größe.
+const ladungBilder = new Map();
+function ladungBild(l, plaetze, b = 900, h = 300) {
+  const schluessel = [l.id, b, h, ...plaetze.map((p) => `${p.g.id}@${p.x}#${p.stopp}`)].join('|');
+  if (ladungBilder.has(schluessel)) return ladungBilder.get(schluessel);
+  if (typeof THREE === 'undefined') return null;
+  const url = standbild(ladungGruppe(l, plaetze, stoppSchildGross, false, false), b, h, null, [-0.28, 0.36, 0.89], [0, 0, 0]);
+  if (!url) return null;
+  if (ladungBilder.size > 60) ladungBilder.clear(); // nach vielem Umlegen nicht endlos wachsen
+  ladungBilder.set(schluessel, url);
   return url;
 }
