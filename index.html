@@ -339,6 +339,7 @@
   /* Rundgang: dunkle Fläche mit Loch um das erklärte Element, daneben die Karte */
   .rundgang { position: fixed; inset: 0; z-index: 50; }
   .rg-loch { position: fixed; border-radius: 12px; box-shadow: 0 0 0 4px var(--gruen), 0 0 0 9999px rgba(31,36,41,.55); transition: top .25s, left .25s, width .25s, height .25s; pointer-events: none; }
+  .rg-loch.rg-fest { position: absolute; z-index: 49; transition: none; }
   .rg-karte { position: fixed; width: min(390px, calc(100vw - 24px)); background: #fff; border-radius: 14px; padding: 16px 18px; box-shadow: 0 10px 40px rgba(0,0,0,.3); }
   .rg-karte h2 { margin: 0 0 6px; font-size: 17px; }
   .rg-karte p { margin: 0 0 14px; font-size: 14px; line-height: 1.5; color: var(--schiefer); }
@@ -349,6 +350,8 @@
     .rg-karte p { font-size: 13.5px; margin-bottom: 10px; }
     .rg-fuss .rg-zahl { flex-basis: 100%; margin: 0; }
     #rg-ueberspringen { margin-right: auto; }
+    .rundgang { pointer-events: none; } /* Wischen geht an die Seite, nur die Karte ist bedienbar */
+    .rundgang .rg-karte { pointer-events: auto; }
   }
 
   @media (max-width: 1180px) {

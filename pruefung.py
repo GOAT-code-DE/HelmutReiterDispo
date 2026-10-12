@@ -704,16 +704,18 @@ with sync_playwright() as p:
     m.goto(seite); m.wait_for_timeout(2500)
     lage = m.evaluate("""(() => { const k = document.querySelector('.rg-karte').getBoundingClientRect(); return k.left >= 0 && k.right <= innerWidth; })()""")
     pruefe('Handy: Rundgang-Karte passt in die Breite', lage)
-    # Jeder Schritt am Handy: Karte unten ganz im Bild, Knöpfe in einer Zeile, das Ziel sichtbar über der Karte (Loch endet darüber)
-    HANDY_RG = """(() => { const k = document.querySelector('.rg-karte').getBoundingClientRect(), l = document.querySelector('.rg-loch').getBoundingClientRect();
+    # Jeder Schritt am Handy: Karte unten ganz im Bild, Knöpfe in einer Zeile, der Rahmen umfasst das ganze Ziel und hängt fest daran (rollt beim Wischen mit)
+    HANDY_RG = """(() => { const k = document.querySelector('.rg-karte').getBoundingClientRect(), loch = document.querySelector('.rg-loch'), ziel = RUNDGANG[rg.schritt].ziel();
       const knoepfe = [...document.querySelectorAll('.rg-fuss button')].map(b => Math.round(b.getBoundingClientRect().top));
+      const passt = () => { const l = loch.getBoundingClientRect(), z = ziel.getBoundingClientRect(); return l.top <= z.top && l.bottom >= z.bottom && l.left <= z.left + 1 && l.right >= z.right - 1; };
+      const vorher = passt(); scrollBy({ top: 150, behavior: 'instant' }); const nachher = passt(); scrollBy({ top: -150, behavior: 'instant' });
       return { karte: k.left >= 0 && k.right <= innerWidth && k.bottom <= innerHeight && k.top > innerHeight / 2,
-        zeile: new Set(knoepfe).size === 1, loch: l.height >= 30 && l.top >= 0 && l.bottom <= k.top, quer: document.documentElement.scrollWidth <= innerWidth }; })()"""
+        zeile: new Set(knoepfe).size === 1, rahmen: vorher, fest: nachher, sichtbar: ziel.getBoundingClientRect().top < k.top, quer: document.documentElement.scrollWidth <= innerWidth }; })()"""
     handy_rg = []
     for i in range(8):
         handy_rg.append(m.evaluate(HANDY_RG))
         if i < 7: m.click('#rg-weiter'); m.wait_for_timeout(500)
-    pruefe(f'Handy: jeder Rundgang-Schritt mit Karte unten, Knöpfen in einer Zeile und sichtbarem Ziel darüber ({[i + 1 for i, x in enumerate(handy_rg) if not all(x.values())]})',
+    pruefe(f'Handy: jeder Rundgang-Schritt mit Karte unten, Knöpfen in einer Zeile, Rahmen ums ganze Ziel, der beim Wischen mitrollt ({[(i + 1, [n for n, v in x.items() if not v]) for i, x in enumerate(handy_rg) if not all(x.values())]})',
            all(all(x.values()) for x in handy_rg))
     m.keyboard.press('Escape'); m.wait_for_timeout(300)
     m.click('#beladung-berechnen'); m.wait_for_timeout(800)

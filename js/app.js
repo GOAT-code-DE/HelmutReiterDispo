@@ -934,6 +934,7 @@ function rundgangStarten() {
 function rundgangEnde() {
   try { localStorage.setItem(RUNDGANG_GESEHEN, 'ja'); } catch (e) { /* ohne Speicher startet er beim nächsten Öffnen wieder */ }
   rg?.huelle.remove();
+  rg?.loch.remove();
   rg = null;
   $('.app').inert = false;
   $('#rundgang-knopf').focus();
@@ -948,8 +949,10 @@ function rundgangZeigen() {
       knopf('Überspringen', { class: 'knopf zweit', id: 'rg-ueberspringen' }, rundgangEnde),
       ...(rg.schritt ? [knopf('Zurück', { class: 'knopf zweit', id: 'rg-zurueck' }, () => { rg.schritt--; rundgangZeigen(); })] : []),
       weiter));
-  const loch = el('div', { class: 'rg-loch' });
-  rg.huelle.replaceChildren(loch, karte);
+  // Am Handy hängt der Rahmen fest am Ziel (absolut im Dokument) und rollt beim Wischen mit dem Inhalt mit; sonst liegt er fest über dem Bild
+  rg.loch?.remove();
+  rg.loch = el('div', { class: rgHandy() ? 'rg-loch rg-fest' : 'rg-loch' });
+  if (rgHandy()) { document.body.append(rg.loch); rg.huelle.replaceChildren(karte); } else rg.huelle.replaceChildren(rg.loch, karte);
   const ziel = s.ziel();
   if (rgHandy()) { // die Karte steht unten; das Ziel in den Platz darüber rollen, ein hohes Ziel mit seinem Anfang
     const frei = innerHeight - karte.offsetHeight - 36, r = ziel?.getBoundingClientRect();
@@ -961,14 +964,17 @@ function rundgangZeigen() {
 const rgHandy = () => innerWidth <= 600;
 function rundgangPlatzieren() {
   if (!rg) return;
-  const ziel = RUNDGANG[rg.schritt].ziel(), loch = rg.huelle.querySelector('.rg-loch'), karte = rg.huelle.querySelector('.rg-karte');
+  const ziel = RUNDGANG[rg.schritt].ziel(), loch = rg.loch, karte = rg.huelle.querySelector('.rg-karte');
   const r = ziel ? ziel.getBoundingClientRect() : { left: innerWidth / 2, top: innerHeight / 2, width: 0, height: 0, bottom: innerHeight / 2 };
   const kb = karte.offsetWidth, kh = karte.offsetHeight, handy = rgHandy();
   const rand = 6, oben = Math.max(4, r.top - rand), links = Math.max(4, r.left - rand);
-  const unten = handy ? innerHeight - kh - 20 : innerHeight - 4; // auf dem Handy endet das Loch über der Karte
+  if (handy) { // das ganze Ziel umrahmen, in Dokumentkoordinaten; die Karte steht unten
+    Object.assign(loch.style, { top: `${r.top + scrollY - rand}px`, left: `${links}px`, width: `${Math.min(innerWidth - 8, r.width + 2 * rand)}px`, height: `${r.height + 2 * rand}px` });
+    karte.style.top = `${innerHeight - kh - 8}px`; karte.style.left = '';
+    return;
+  }
   Object.assign(loch.style, { top: `${oben}px`, left: `${links}px`, width: `${Math.min(innerWidth - 8, r.width + 2 * rand)}px`,
-    height: `${Math.max(0, Math.min(unten, r.bottom + rand) - oben)}px` });
-  if (handy) { karte.style.top = `${innerHeight - kh - 8}px`; karte.style.left = ''; return; }
+    height: `${Math.min(innerHeight - 8, r.height + 2 * rand)}px` });
   let y = r.bottom + 14;
   if (y + kh > innerHeight - 8) y = r.top - kh - 14;
   if (y < 8) y = innerHeight - kh - 12;
@@ -1023,7 +1029,6 @@ $('#kunden-suche').addEventListener('input', (e) => { kf.suche = e.target.value;
 document.querySelectorAll('#kunden-filter button').forEach((b) => b.addEventListener('click', () => { kf.filter = b.dataset.filter; renderKunden(); }));
 document.addEventListener('keydown', (e) => { if (rg && e.key === 'Escape') rundgangEnde(); });
 window.addEventListener('resize', rundgangPlatzieren);
-window.addEventListener('scroll', rundgangPlatzieren, { passive: true }); // rollt die Seite unter dem Rundgang, wandert das Loch mit
 ladeplanBedienungAufbauen();
 karteAufbauen();
 waehleAnsicht('planen');
