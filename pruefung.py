@@ -704,6 +704,17 @@ with sync_playwright() as p:
     m.goto(seite); m.wait_for_timeout(2500)
     lage = m.evaluate("""(() => { const k = document.querySelector('.rg-karte').getBoundingClientRect(); return k.left >= 0 && k.right <= innerWidth; })()""")
     pruefe('Handy: Rundgang-Karte passt in die Breite', lage)
+    # Jeder Schritt am Handy: Karte unten ganz im Bild, Knöpfe in einer Zeile, das Ziel sichtbar über der Karte (Loch endet darüber)
+    HANDY_RG = """(() => { const k = document.querySelector('.rg-karte').getBoundingClientRect(), l = document.querySelector('.rg-loch').getBoundingClientRect();
+      const knoepfe = [...document.querySelectorAll('.rg-fuss button')].map(b => Math.round(b.getBoundingClientRect().top));
+      return { karte: k.left >= 0 && k.right <= innerWidth && k.bottom <= innerHeight && k.top > innerHeight / 2,
+        zeile: new Set(knoepfe).size === 1, loch: l.height >= 30 && l.top >= 0 && l.bottom <= k.top, quer: document.documentElement.scrollWidth <= innerWidth }; })()"""
+    handy_rg = []
+    for i in range(8):
+        handy_rg.append(m.evaluate(HANDY_RG))
+        if i < 7: m.click('#rg-weiter'); m.wait_for_timeout(500)
+    pruefe(f'Handy: jeder Rundgang-Schritt mit Karte unten, Knöpfen in einer Zeile und sichtbarem Ziel darüber ({[i + 1 for i, x in enumerate(handy_rg) if not all(x.values())]})',
+           all(all(x.values()) for x in handy_rg))
     m.keyboard.press('Escape'); m.wait_for_timeout(300)
     m.click('#beladung-berechnen'); m.wait_for_timeout(800)
     for v in ['planen', 'kunden', 'ladeplan', 'plantafel', 'fuhrpark']:

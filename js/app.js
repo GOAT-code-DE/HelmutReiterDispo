@@ -899,7 +899,7 @@ function renderFuhrpark() {
 // ---------- Rundgang: kurze Geschichte beim ersten Öffnen, danach über den Knopf ----------
 const RUNDGANG_GESEHEN = 'reiter-dispo-rundgang';
 const RUNDGANG = [
-  { ziel: () => $('#auftrag-liste') || $('#plan-auftraege'), titel: () => `${offeneAuftraege().length} Transporte morgen`,
+  { ziel: () => $('#auftrag-liste') || $('#plan-auftraege'), titel: () => `${offeneAuftraege().length} Transporte ${wann()}`,
     text: () => `Auslieferungen zum Mietbeginn und Abholungen zum Mietende bei ${new Set(offeneAuftraege().map((a) => a.ort)).size} Kunden. Jedes Gerät passt nur auf bestimmte Lkw: Rampe, Kante, Zurrpunkte, Breite, Gewicht und Achslast müssen stimmen.` },
   { ziel: () => $('#beladung-berechnen'), titel: () => 'Ein Klick statt Ausprobieren',
     text: () => 'Statt Gerät für Gerät aufzuladen und dann zu merken, dass das dritte nicht mehr passt, rechnet das System alle sinnvollen Ladevarianten durch.' },
@@ -910,11 +910,11 @@ const RUNDGANG = [
   { vorher: () => fahrtWaehlen((t) => begruendungen(t).some(([, txt]) => txt.includes('Zurrpunkt'))), ziel: () => $('#detail-inhalt'), titel: () => 'Jede Entscheidung mit Grund',
     text: () => 'Zum Beispiel, warum ein Gerät nicht mehr mitpasst oder ein freier Lkw nicht taugt, oft wegen der Zurrpunkte. Über „anderer Lkw“ lässt sich jedes Gerät von Hand umlegen, die Prüfung läuft sofort neu.' },
   { ziel: () => $('.detail-unten'), titel: () => 'Die Route Etappe für Etappe',
-    text: () => 'Links eine Fahrt wählen, hier stehen ihre Etappen vom Hof bis zurück, mit Zeit, Kilometern und was ab- oder aufgeladen wird. Ein Klick auf eine Etappe hebt ihre Strecke auf der Karte hervor.' },
+    text: () => 'Zu jeder Fahrt stehen hier die Etappen vom Hof bis zurück, mit Zeit, Kilometern und was ab- oder aufgeladen wird. Ein Klick auf eine Etappe hebt ihre Strecke auf der Karte hervor.' },
   { ziel: () => $('#detail-3d'), titel: () => 'Die Ladung in 3D',
     text: () => 'So steht jedes Gerät auf der Ladefläche, mit Stoppnummer, Zonen und Zurrpunkten; zum Drehen seitlich ziehen. Im Ladeplan lässt sich alles nachprüfen und ändern. Die Ladeliste für den Fahrer gibt es zum Drucken; fällt ein Lkw aus, rechnet der Plan sofort neu.' },
   { ziel: () => $('.marken'), titel: () => 'Made by GOAT code',
-    text: () => 'Diesen Rundgang gibt es jederzeit wieder über den Knopf „Rundgang“ oben rechts.' },
+    text: () => 'Diesen Rundgang gibt es jederzeit wieder über den Knopf „Rundgang“ oben.' },
 ];
 // Rundgang: die erste Fahrt wählen, auf die bed passt (sonst bleibt die Auswahl)
 function fahrtWaehlen(bed) { const i = plan ? plan.touren.findIndex(bed) : -1; if (i >= 0 && i !== planGewaehlt) { planGewaehlt = i; renderPlanen(); } }
@@ -951,17 +951,24 @@ function rundgangZeigen() {
   const loch = el('div', { class: 'rg-loch' });
   rg.huelle.replaceChildren(loch, karte);
   const ziel = s.ziel();
-  ziel?.scrollIntoView({ block: 'center' });
+  if (rgHandy()) { // die Karte steht unten; das Ziel in den Platz darüber rollen, ein hohes Ziel mit seinem Anfang
+    const frei = innerHeight - karte.offsetHeight - 36, r = ziel?.getBoundingClientRect();
+    if (r) window.scrollTo({ top: scrollY + r.top - (r.height < frei ? (frei - r.height) / 2 : 0) - 12, behavior: 'instant' });
+  } else ziel?.scrollIntoView({ block: 'center' });
   rundgangPlatzieren();
   weiter.focus();
 }
+const rgHandy = () => innerWidth <= 600;
 function rundgangPlatzieren() {
   if (!rg) return;
   const ziel = RUNDGANG[rg.schritt].ziel(), loch = rg.huelle.querySelector('.rg-loch'), karte = rg.huelle.querySelector('.rg-karte');
   const r = ziel ? ziel.getBoundingClientRect() : { left: innerWidth / 2, top: innerHeight / 2, width: 0, height: 0, bottom: innerHeight / 2 };
+  const kb = karte.offsetWidth, kh = karte.offsetHeight, handy = rgHandy();
   const rand = 6, oben = Math.max(4, r.top - rand), links = Math.max(4, r.left - rand);
-  Object.assign(loch.style, { top: `${oben}px`, left: `${links}px`, width: `${Math.min(innerWidth - 8, r.width + 2 * rand)}px`, height: `${Math.min(innerHeight - 8, r.height + 2 * rand)}px` });
-  const kb = karte.offsetWidth, kh = karte.offsetHeight;
+  const unten = handy ? innerHeight - kh - 20 : innerHeight - 4; // auf dem Handy endet das Loch über der Karte
+  Object.assign(loch.style, { top: `${oben}px`, left: `${links}px`, width: `${Math.min(innerWidth - 8, r.width + 2 * rand)}px`,
+    height: `${Math.max(0, Math.min(unten, r.bottom + rand) - oben)}px` });
+  if (handy) { karte.style.top = `${innerHeight - kh - 8}px`; karte.style.left = ''; return; }
   let y = r.bottom + 14;
   if (y + kh > innerHeight - 8) y = r.top - kh - 14;
   if (y < 8) y = innerHeight - kh - 12;
@@ -1016,6 +1023,7 @@ $('#kunden-suche').addEventListener('input', (e) => { kf.suche = e.target.value;
 document.querySelectorAll('#kunden-filter button').forEach((b) => b.addEventListener('click', () => { kf.filter = b.dataset.filter; renderKunden(); }));
 document.addEventListener('keydown', (e) => { if (rg && e.key === 'Escape') rundgangEnde(); });
 window.addEventListener('resize', rundgangPlatzieren);
+window.addEventListener('scroll', rundgangPlatzieren, { passive: true }); // rollt die Seite unter dem Rundgang, wandert das Loch mit
 ladeplanBedienungAufbauen();
 karteAufbauen();
 waehleAnsicht('planen');
