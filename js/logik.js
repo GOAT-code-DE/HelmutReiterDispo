@@ -33,13 +33,13 @@ function neuerStand() {
     alleTouren: [...structuredClone(SEED_TOUREN).map((t) => ({ ...t, tag: HEUTE })), ...b.touren],
     alleSped: [...structuredClone(SEED_SPED).map((x) => ({ ...x, tag: HEUTE })), ...b.sped],
     alleAuftraege: [...SEED_LADETAG.map(({ tagNr, ...a }) => ({ ...a, tag: tagPlus(HEUTE, tagNr ?? LADETAG_NR) })),
-      // Abholungen der erzeugten Verträge, die in den nächsten drei Wochen enden
-      ...VERTRAEGE_ERZEUGT.filter((v) => v.abholen && v.bis <= 21).map((v, i) => ({ id: 'B' + (300 + i), tag: tagPlus(HEUTE, v.bis), art: 'Abholung',
+      // Abholungen der erzeugten Verträge, die in den nächsten drei Wochen enden (nicht am Beispieltag und an den Folgetagen, deren Aufträge stehen fest)
+      ...VERTRAEGE_ERZEUGT.filter((v) => v.abholen && v.bis <= 21 && ![LADETAG_NR, ...FOLGETAG_NR].includes(v.bis)).map((v, i) => ({ id: 'B' + (300 + i), tag: tagPlus(HEUTE, v.bis), art: 'Abholung',
         vertrag: v.id, geraet: v.geraet, ort: v.kunde, ab: 8 * 60, bis: 16 * 60 }))],
     vertraege: [...SEED_VERTRAEGE, ...VERTRAEGE_ERZEUGT].map((v) => ({ ...v, von: tagPlus(HEUTE, v.von), bis: tagPlus(HEUTE, v.bis) })),
     kunden: [],    // neu angelegte Kunden; die Beispielkunden stehen in KUNDEN
     werkstatt: [], // [{ lkw, tag }]: Lkw fällt an diesem Tag aus
-    nr: b.nr, kosten: { ...KOSTEN_START },
+    nr: b.nr, kosten: { ...KOSTEN_START }, heute: HEUTE,
   });
 }
 // Beispieltouren von einer Woche zurück bis drei Wochen voraus, nah voller, fern lichter (fester Zufall)
@@ -82,7 +82,8 @@ function beispielTage() {
     }
   }
   // Erst nach dem Würfeln filtern, damit die übrigen Tage gleich bleiben
-  return { touren: [...touren.filter((t) => t.tag !== ladetag() || LADETAG_BELEGT.includes(t.lkw)),
+  const folgetage = FOLGETAG_NR.map((n) => tagPlus(HEUTE, n));
+  return { touren: [...touren.filter((t) => t.tag !== ladetag() && (!folgetage.includes(t.tag) || FOLGETAG_BELEGT.includes(t.lkw))),
     ...LADETAG_TOUREN.map((t) => ({ ...t, tag: ladetag() }))], sped, nr };
 }
 function laden() {
@@ -95,7 +96,8 @@ function laden() {
     const kundeOk = (k) => k && id(k, /^K\d{2,6}$/) && Object.keys(k).length === KUNDE_FELDER.length && KUNDE_FELDER.every((f) => f in k)
       && text(k.firma, 80) && k.firma.trim() && text(k.strasse, 80) && /^\d{5}$/.test(k.plz) && text(k.stadt, 60) && text(k.ansprechpartner, 60) && text(k.telefon, 40)
       && Number.isFinite(k.lat) && Number.isFinite(k.lng) && k.lat > 47 && k.lat < 55.5 && k.lng > 5.5 && k.lng < 15.5;
-    if (!s || !Array.isArray(s.kunden) || !s.kunden.every(kundeOk)) throw new Error('Kunden ungültig');
+    if (!s || s.heute !== HEUTE) throw new Error('Stand von einem anderen Tag'); // alte Beispieldaten lägen in der Vergangenheit
+    if (!Array.isArray(s.kunden) || !s.kunden.every(kundeOk)) throw new Error('Kunden ungültig');
     kundenEintragen(s.kunden); // erst danach kennt finde(ORTE, …) die neuen Kunden
     const vertragOk = (v) => v && id(v, /^M\d{2,6}$/) && /^K/.test(v.kunde) && finde(ORTE, v.kunde) && finde(GERAETE, v.geraet)
       && istTag(v.von) && istTag(v.bis) && v.von <= v.bis && typeof v.abholen === 'boolean' && Object.keys(v).length === 6;

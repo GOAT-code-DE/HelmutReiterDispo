@@ -4,7 +4,6 @@
 
 const TAG_START = 6 * 60, TAG_ENDE = 19 * 60, SPANNE = TAG_ENDE - TAG_START;
 const DEMO_JETZT = 10 * 60 + 30;
-const HEUTE = '2026-10-06';               // Demo-Datum (Dienstag)
 
 // ---------- Datum als Zeichenkette JJJJ-MM-TT (Mittag UTC, damit Sommerzeit nichts verschiebt) ----------
 const WOCHENTAGE = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
@@ -22,6 +21,13 @@ function kalenderwoche(tag) { // ISO-Kalenderwoche
 }
 const istTag = (x) => typeof x === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x) && tagPlus(x, 0) === x;
 const istSonntag = (tag) => wochentag(tag) === 0;   // Lkw-Fahrverbot: sonntags wird nicht geplant
+// Demo-Datum ist der Tag, an dem die Demo geöffnet wird (Samstag und Sonntag: der folgende Montag),
+// damit die Beispieldaten nie in der Vergangenheit liegen. Alle Beispieltage zählen von hier aus.
+const HEUTE = (() => {
+  const d = new Date(), tag = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return tagPlus(tag, [1, 0, 0, 0, 0, 0, 2][wochentag(tag)]);
+})();
+const werktagNr = (n) => { while (wochentag(tagPlus(HEUTE, n)) % 6 === 0) n++; return n; }; // n Tage nach HEUTE, Wochenende übersprungen
 const MAX_HOEHE = 4.0, MAX_BREITE = 2.55; // StVZO, darüber nur mit Genehmigung
 const LADEN_MIN = 30, KMH = 50, STRASSENFAKTOR = 1.3;
 const FS_RANG = { B: 1, C: 2, CE: 3 };
@@ -208,7 +214,7 @@ const KUNDEN_ERZEUGT = [], VERTRAEGE_ERZEUGT = [];
     for (let k = 0; k < anzahl; k++) {
       const von = -5 - Math.floor(zufall() * 400);
       let bis = 2 + Math.floor(zufall() * 500);
-      if ((new Date(Date.UTC(2026, 9, 6 + bis))).getUTCDay() === 0) bis++; // nicht am Sonntag enden
+      if (istSonntag(tagPlus(HEUTE, bis))) bis++; // nicht am Sonntag enden
       VERTRAEGE_ERZEUGT.push({ id: 'M' + (100 + VERTRAEGE_ERZEUGT.length + 1), kunde: id, geraet: wahl(GERAETE.filter((g) => g.gewicht < 13)).id, von, bis, abholen: zufall() < 0.8 });
     }
   }
@@ -216,26 +222,37 @@ const KUNDEN_ERZEUGT = [], VERTRAEGE_ERZEUGT = [];
 KUNDEN.push(...KUNDEN_ERZEUGT);
 
 // Mietverträge (Tage relativ zu HEUTE): abholen = am Mietende holt Reiter das Gerät ab, sonst bringt der Kunde es zurück
-const LADETAG_NR = 1;
+const LADETAG_NR = werktagNr(1);                                  // Beispieltag: der nächste Werktag
+const FOLGETAG_NR = [werktagNr(LADETAG_NR + 1), werktagNr(werktagNr(LADETAG_NR + 1) + 1)]; // die zwei Werktage danach
 const SEED_VERTRAEGE = [
-  { id: 'M01', kunde: 'K01', geraet: 'G13', von: 1, bis: 22, abholen: true },
-  { id: 'M02', kunde: 'K01', geraet: 'G13', von: 1, bis: 22, abholen: true },
-  { id: 'M03', kunde: 'K01', geraet: 'G14', von: 1, bis: 15, abholen: true },
-  { id: 'M04', kunde: 'K02', geraet: 'G16', von: 1, bis: 45, abholen: true },
-  { id: 'M05', kunde: 'K02', geraet: 'G17', von: 1, bis: 45, abholen: false },
-  { id: 'M06', kunde: 'K03', geraet: 'G18', von: 1, bis: 120, abholen: true },
-  { id: 'M07', kunde: 'K04', geraet: 'G15', von: 1, bis: 10, abholen: true },
-  { id: 'M08', kunde: 'K04', geraet: 'G03', von: 1, bis: 10, abholen: true },
-  { id: 'M09', kunde: 'K05', geraet: 'G05', von: 1, bis: 400, abholen: true },
-  { id: 'M10', kunde: 'K06', geraet: 'G05', von: 1, bis: 60, abholen: true },
-  { id: 'M11', kunde: 'K06', geraet: 'G01', von: 1, bis: 60, abholen: true },
-  { id: 'M12', kunde: 'K08', geraet: 'G02', von: -40, bis: 1, abholen: true },
-  { id: 'M13', kunde: 'K06', geraet: 'G04', von: -90, bis: 1, abholen: true },
-  { id: 'M14', kunde: 'K03', geraet: 'G14', von: -21, bis: 1, abholen: true },
+  { id: 'M01', kunde: 'K01', geraet: 'G13', von: LADETAG_NR, bis: 22, abholen: true },
+  { id: 'M02', kunde: 'K01', geraet: 'G13', von: LADETAG_NR, bis: 22, abholen: true },
+  { id: 'M03', kunde: 'K01', geraet: 'G14', von: LADETAG_NR, bis: 15, abholen: true },
+  { id: 'M04', kunde: 'K02', geraet: 'G16', von: LADETAG_NR, bis: 45, abholen: true },
+  { id: 'M05', kunde: 'K02', geraet: 'G17', von: LADETAG_NR, bis: 45, abholen: false },
+  { id: 'M06', kunde: 'K03', geraet: 'G18', von: LADETAG_NR, bis: 120, abholen: true },
+  { id: 'M07', kunde: 'K04', geraet: 'G15', von: LADETAG_NR, bis: 10, abholen: true },
+  { id: 'M08', kunde: 'K04', geraet: 'G03', von: LADETAG_NR, bis: 10, abholen: true },
+  { id: 'M09', kunde: 'K05', geraet: 'G05', von: LADETAG_NR, bis: 400, abholen: true },
+  { id: 'M10', kunde: 'K06', geraet: 'G05', von: LADETAG_NR, bis: 60, abholen: true },
+  { id: 'M11', kunde: 'K06', geraet: 'G01', von: LADETAG_NR, bis: 60, abholen: true },
+  { id: 'M12', kunde: 'K08', geraet: 'G02', von: -40, bis: LADETAG_NR, abholen: true },
+  { id: 'M13', kunde: 'K06', geraet: 'G04', von: -90, bis: LADETAG_NR, abholen: true },
+  { id: 'M14', kunde: 'K03', geraet: 'G14', von: -21, bis: LADETAG_NR, abholen: true },
   { id: 'M20', kunde: 'K05', geraet: 'G06', von: -585, bis: 451, abholen: true },
   { id: 'M21', kunde: 'K10', geraet: 'G10', von: -264, bis: 465, abholen: true },
   { id: 'M22', kunde: 'K07', geraet: 'G01', von: -35, bis: 24, abholen: false },
-  { id: 'M23', kunde: 'K11', geraet: 'G03', von: -57, bis: 8, abholen: true },
+  { id: 'M23', kunde: 'K11', geraet: 'G03', von: -57, bis: werktagNr(8), abholen: true },
+  // Verträge zu den Aufträgen der zwei Folgetage
+  { id: 'M30', kunde: 'K07', geraet: 'G16', von: FOLGETAG_NR[0], bis: 30, abholen: true },
+  { id: 'M31', kunde: 'K07', geraet: 'G13', von: FOLGETAG_NR[0], bis: 30, abholen: true },
+  { id: 'M32', kunde: 'K09', geraet: 'G15', von: FOLGETAG_NR[0], bis: 40, abholen: true },
+  { id: 'M33', kunde: 'K12', geraet: 'G01', von: -30, bis: FOLGETAG_NR[0], abholen: true },
+  { id: 'M34', kunde: 'K02', geraet: 'G14', von: -14, bis: FOLGETAG_NR[0], abholen: true },
+  { id: 'M35', kunde: 'K05', geraet: 'G18', von: FOLGETAG_NR[1], bis: 25, abholen: true },
+  { id: 'M36', kunde: 'K11', geraet: 'G02', von: FOLGETAG_NR[1], bis: 18, abholen: true },
+  { id: 'M37', kunde: 'K04', geraet: 'G12', von: -20, bis: FOLGETAG_NR[1], abholen: true },
+  { id: 'M38', kunde: 'K08', geraet: 'G17', von: -45, bis: FOLGETAG_NR[1], abholen: true },
   { id: 'M24', kunde: 'K09', geraet: 'G07', von: -158, bis: 206, abholen: true },
 ];
 // Transportaufträge: Auslieferung zum Mietbeginn (bis = spätestens beim Kunden),
@@ -255,11 +272,25 @@ const SEED_LADETAG = [
   { id: 'B12', art: 'Abholung', vertrag: 'M12', geraet: 'G02', ort: 'K08', ab: 10 * 60, bis: 16 * 60 },
   { id: 'B13', art: 'Abholung', vertrag: 'M13', geraet: 'G04', ort: 'K06', ab: 11 * 60, bis: 16 * 60 },
   { id: 'B14', art: 'Abholung', vertrag: 'M14', geraet: 'G14', ort: 'K03', ab: 9 * 60, bis: 15 * 60 },
-  { id: 'B20', art: 'Abholung', vertrag: 'M23', geraet: 'G03', ort: 'K11', ab: 8 * 60, bis: 16 * 60, tagNr: 8 },
+  { id: 'B20', art: 'Abholung', vertrag: 'M23', geraet: 'G03', ort: 'K11', ab: 8 * 60, bis: 16 * 60, tagNr: werktagNr(8) },
+  { id: 'B30', art: 'Auslieferung', vertrag: 'M30', geraet: 'G16', ort: 'K07', bis: 9 * 60, tagNr: FOLGETAG_NR[0] },
+  { id: 'B31', art: 'Auslieferung', vertrag: 'M31', geraet: 'G13', ort: 'K07', bis: 9 * 60, tagNr: FOLGETAG_NR[0] },
+  { id: 'B32', art: 'Auslieferung', vertrag: 'M32', geraet: 'G15', ort: 'K09', bis: 10 * 60, tagNr: FOLGETAG_NR[0] },
+  { id: 'B33', art: 'Abholung', vertrag: 'M33', geraet: 'G01', ort: 'K12', ab: 10 * 60, bis: 15 * 60, tagNr: FOLGETAG_NR[0] },
+  { id: 'B34', art: 'Abholung', vertrag: 'M34', geraet: 'G14', ort: 'K02', ab: 12 * 60, bis: 16 * 60, tagNr: FOLGETAG_NR[0] },
+  { id: 'B35', art: 'Auslieferung', vertrag: 'M35', geraet: 'G18', ort: 'K05', bis: 9 * 60 + 30, tagNr: FOLGETAG_NR[1] },
+  { id: 'B36', art: 'Auslieferung', vertrag: 'M36', geraet: 'G02', ort: 'K11', bis: 11 * 60, tagNr: FOLGETAG_NR[1] },
+  { id: 'B37', art: 'Abholung', vertrag: 'M37', geraet: 'G12', ort: 'K04', ab: 9 * 60, bis: 14 * 60, tagNr: FOLGETAG_NR[1] },
+  { id: 'B38', art: 'Abholung', vertrag: 'M38', geraet: 'G17', ort: 'K08', ab: 11 * 60, bis: 16 * 60, tagNr: FOLGETAG_NR[1] },
 ];
-const LADETAG_BELEGT = ['L06', 'L09']; // nur diese Lkw behalten am Beispieltag ihre erzeugten Touren, sonst ist der Fuhrpark fast voll
-const LADETAG_TOUREN = [                // und diese Tour steht für den Beispieltag schon fest
+// Am Beispieltag fallen die erzeugten Touren weg (an den Folgetagen alle bis auf FOLGETAG_BELEGT), sonst wäre der Fuhrpark fast voll.
+// Am Beispieltag stehen stattdessen diese Touren fest, damit der Plan an jedem Wochentag gleich ausfällt.
+const FOLGETAG_BELEGT = ['L02', 'L06', 'L09']; // an den Folgetagen behalten nur diese Lkw ihre erzeugten Touren
+const LADETAG_TOUREN = [
   { id: 'T901', lkw: 'L10', fahrer: 'F02', geraet: 'G06', ort: 'k', art: 'Auslieferung', start: 7 * 60 },
+  { id: 'T902', lkw: 'L06', fahrer: 'F06', geraet: 'G03', ort: 're', art: 'Abholung', start: 7 * 60 + 45 },
+  { id: 'T903', lkw: 'L06', fahrer: 'F04', geraet: 'G04', ort: 'k', art: 'Abholung', start: 10 * 60 + 45 },
+  { id: 'T904', lkw: 'L09', fahrer: 'F03', geraet: 'G08', ort: 'kr', art: 'Abholung', start: 8 * 60 + 30 },
 ];
 
 // Kostenannahmen für die Schätzung im Ergebnis (Beispielwerte, mit Reiter abstimmen)

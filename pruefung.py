@@ -1,6 +1,6 @@
 """Prüfskript der Klick-Demo. Aufruf: python pruefung.py index.html <ausgabeordner>
 Nutzt den installierten Edge (Playwright ohne eigenen Chromium). Karte und Routen brauchen Internet."""
-import sys, pathlib
+import sys, pathlib, datetime
 from playwright.sync_api import sync_playwright
 
 seite = pathlib.Path(sys.argv[1]).resolve().as_uri()
@@ -8,6 +8,11 @@ aus = pathlib.Path(sys.argv[2])
 aus.mkdir(exist_ok=True)
 SPEICHER, RUNDGANG = 'reiter-dispo-demo-v4', 'reiter-dispo-rundgang'
 fehler, ergebnisse = [], []
+# Die Demo rechnet vom Öffnungstag aus; die Prüfung friert die Uhr auf Di 06.10.2026 10:30 ein, damit die Daten fest sind
+DEMO_ZEIT = datetime.datetime(2026, 10, 6, 10, 30)
+
+def wochentag_py(tag):  # 0 = Montag … 6 = Sonntag
+    return datetime.date.fromisoformat(tag).weekday()
 
 def pruefe(name, bed):
     ergebnisse.append((name, bool(bed)))
@@ -27,6 +32,7 @@ def frisch(pg, rundgang=False):
 with sync_playwright() as p:
     b = p.chromium.launch(channel='msedge', args=['--use-angle=swiftshader', '--enable-unsafe-swiftshader'])
     pg = b.new_page(viewport={'width': 1600, 'height': 960})
+    pg.clock.set_fixed_time(DEMO_ZEIT)
     pg.on('console', lambda m: m.type == 'error' and fehler.append(m.text))
     pg.on('pageerror', lambda e: fehler.append(str(e)))
     pg.goto(seite); pg.wait_for_timeout(1000)
@@ -53,7 +59,7 @@ with sync_playwright() as p:
         schritte.append(lage['loch'] and lage['karte'])
         pg.click('#rg-weiter'); pg.wait_for_timeout(400)
     pruefe(f'Rundgang: 8 Schritte, Ziel und Karte jeweils ganz im Bild {schritte}', all(schritte))
-    pruefe('Rundgang: nach „Fertig“ geschlossen, Plan berechnet', pg.locator('.rundgang').count() == 0 and pg.locator('.tourkarte').count() == 7)
+    pruefe('Rundgang: nach „Fertig“ geschlossen, Plan berechnet', pg.locator('.rundgang').count() == 0 and pg.locator('.fahrt-zeile').count() == 7)
     pg.reload(); pg.wait_for_timeout(1500)
     pruefe('Rundgang: beim zweiten Öffnen nicht mehr von selbst', pg.locator('.rundgang').count() == 0)
     pg.click('#rundgang-knopf'); pg.wait_for_timeout(500)
@@ -67,62 +73,58 @@ with sync_playwright() as p:
     pg.reload(); pg.wait_for_timeout(1500)
     pruefe('Rundgang: Überspringen gilt als gesehen', pg.locator('.rundgang').count() == 0)
 
-    # Planen: Ausliefern und Abholen, Berechnung, Begründungen, Karte
+    # Planen: links die Transporte, rechts vor dem Berechnen die Kunden auf der Karte
     frisch(pg)
-    kopf = pg.inner_text('#plan-auftraege h2')
-    pruefe(f'Planen: 14 Transporte, 11 ausliefern, 3 abholen, 7 Kunden ({kopf})', pg.locator('#plan-auftraege [data-auftrag]').count() == 14
-           and '11 ausliefern, 3 abholen' in kopf and '7 Kunden' in kopf and pg.locator('#plan-auftraege [data-art="Abholung"]').count() == 3)
-    pruefe('Planen: Abholungen mit Abholfenster, Kunden mit Firmennamen', 'abholen 11:00–16:00 Uhr' in pg.inner_text('#plan-auftraege')
-           and 'Vestische Industriemontage GmbH (Recklinghausen)' in pg.inner_text('#plan-auftraege'))
-    gr = pg.evaluate("[...document.querySelectorAll('#plan-auftraege .kunde-gruppe')].map(s => [s.dataset.ort, s.querySelectorAll('[data-auftrag]').length])")
-    pruefe(f'Planen: Transporte nach Kunde gruppiert, 7 Gruppen, Duisburg mit 3 Geräten zuerst ({gr})', len(gr) == 7 and sum(n for _, n in gr) == 14
-           and gr[0][1] == 3 and 'Duisburg' in pg.inner_text('#plan-auftraege .kunde-gruppe h3'))
-    # Reihenfolge der Gruppen gegen die Daten: früheste Frist je Kunde (Abholung: Fensterbeginn) aufsteigend
-    folge = pg.evaluate("""(() => { const f = (a) => (istAbholung(a) ? a.ab : a.bis), m = {};
-      for (const a of offeneAuftraege()) m[a.ort] = Math.min(m[a.ort] ?? 1e9, f(a));
-      return [...document.querySelectorAll('#plan-auftraege .kunde-gruppe')].map(s => m[s.dataset.ort]); })()""")
-    pruefe(f'Planen: Kundengruppen nach frühester Frist sortiert ({folge})', len(folge) == 7 and folge == sorted(folge))
-    reihen = pg.evaluate("""[...document.querySelectorAll('#plan-auftraege .kunde-gruppe')].map(s => [s.querySelector('h3 small').textContent,
-      [...s.querySelectorAll('li')].map(l => l.querySelector('small').textContent)])""")
-    wuppertal = [r for r in reihen if r[0].startswith('abholen ab')]
-    pruefe(f'Planen: reine Abholgruppe mit „abholen ab“ im Kopf und Fenster je Zeile, Auslieferung ohne doppelte Frist ({wuppertal}, {reihen[0]})',
-           len(wuppertal) == 1 and all('–' in z for z in wuppertal[0][1]) and reihen[0][1] == ['ausliefern'] * 3)
-    pruefe('Planen: vor dem Berechnen kein Ergebnis', pg.locator('.tourkarte').count() == 0)
+    kopf = pg.inner_text('#plan-zahl')
+    pruefe(f'Planen: 14 Transporte, 11 ausliefern, 3 abholen, 7 Kunden ({kopf})', pg.locator('#auftrag-liste [data-auftrag]').count() == 14
+           and '11 ausliefern, 3 abholen, 7 Kunden' in kopf and pg.locator('#auftrag-liste [data-art="Abholung"]').count() == 3)
+    pruefe('Planen: Abholungen mit Abholfenster, Kunden mit Firmennamen', '11:00–16:00 Uhr' in pg.inner_text('#auftrag-liste')
+           and 'Vestische Industriemontage GmbH (Recklinghausen)' in pg.inner_text('#auftrag-liste'))
+    folge = pg.evaluate("""[...document.querySelectorAll('#auftrag-liste [data-auftrag]')].map(li => { const a = offeneAuftraege().find(x => x.id === li.dataset.auftrag); return istAbholung(a) ? a.ab : a.bis; })""")
+    pruefe(f'Planen: Transporte nach Frist sortiert, Abholung nach Fensterbeginn ({folge})', len(folge) == 14 and folge == sorted(folge))
+    leer = pg.evaluate("""(() => ({ leer: document.querySelector('.plan-detail').classList.contains('leer'), drei: document.querySelector('#detail-3d').hidden,
+      punkte: document.querySelectorAll('.karten-punkt').length, stopps: document.querySelectorAll('.karten-stopp').length,
+      linien: karte.getSource('route').serialize().data.features.length }))()""")
+    pruefe(f'Planen: vor dem Berechnen große Karte mit den 7 Kunden, ohne Route und ohne 3D ({leer})', leer == {'leer': True, 'drei': True, 'punkte': 7, 'stopps': 0, 'linien': 0}
+           and '7 Kunden, 14 Geräte' in pg.inner_text('#detail-kopf'))
+    pruefe('Planen: vor dem Berechnen keine Fahrten', pg.locator('.fahrt-zeile').count() == 0)
     pg.click('#beladung-berechnen'); pg.wait_for_timeout(800)
     pruef = pg.inner_text('#plan-pruef')
-    pruefe(f'Planen: Prüfzeile mit Ladevarianten und Ergebnis ({pruef[:80]})', 'Ladevarianten geprüft' in pruef and '14 Transporte auf 7 Lkw, 2 an Spedition' in pruef
-           and 'Statt 14 Einzelfahrten' in pruef and 'Abholfenster' in pruef)
-    pruefe('Planen: 7 Fahrten, vier mit 2 Stopps, E-HR 103 bringt beide Scheren zum selben Kunden', pg.locator('.tourkarte').count() == 7
-           and pg.locator('.tourkarte[data-stopps="2"]').count() == 4 and pg.locator('.tourkarte[data-lkw="L03"] .stopps > li').first.inner_text().count('78 SEC') == 2)
-    gemischt = pg.locator('.tourkarte[data-lkw="L10"] .stopps > li').evaluate_all('l => l.map(x => x.dataset.art).join()')
+    pruefe(f'Planen: Prüfkopf mit Zahlen, Ladevarianten und Ergebnis ({pruef[:80]})', 'Ladevarianten geprüft' in pruef and 'Statt 14 Einzelfahrten reichen 7 Fahrten' in pruef
+           and 'Abholfenster' in pruef and pg.locator('#plan-pruef .zahl-kachel').all_inner_texts()[:2] == ['7\neigene Lkw', '2\nan Spedition'])
+    pg.click('.fahrt-zeile[data-fahrt="L03"]'); pg.wait_for_timeout(400)
+    pruefe('Planen: 7 Fahrten, vier mit 2 Stopps, E-HR 103 bringt beide Scheren zum selben Kunden', pg.locator('.fahrt-zeile').count() == 7
+           and pg.locator('.fahrt-zeile[data-stopps="2"]').count() == 4 and pg.locator('#detail-inhalt .stopps > li').first.inner_text().count('78 SEC') == 2)
+    pruefe('Planen: Wartezeit aufs Abholfenster wird erklärt', 'Wartet bei Oberhausen bis 09:00 Uhr auf das Abholfenster' in pg.inner_text('#detail-inhalt'))
+    pg.click('.fahrt-zeile[data-fahrt="L10"]'); pg.wait_for_timeout(400)
+    gemischt = pg.locator('#detail-inhalt .stopps > li').evaluate_all('l => l.map(x => x.dataset.art).join()')
     pruefe(f'Planen: E-HR 110 liefert erst aus und holt auf dem Rückweg ab ({gemischt})', gemischt == 'Auslieferung,Abholung')
-    texte = pg.inner_text('#plan-ergebnis')
+    pruefe('Planen: E-HR 110 startet nach seiner Köln-Fahrt um 11:00 ohne Warten', 'Wartet' not in pg.inner_text('#detail-inhalt') and '11:00' in pg.inner_text('#detail-kopf'))
+    texte = pg.evaluate("plan.touren.flatMap(t => begruendungen(t).map(x => x[1])).join('\\n')") + pg.inner_text('#plan-auftraege')
     pruefe('Planen: Begründungen im Klartext (zu schwer, Rückweg, Ladereihenfolge)', 'zusammen zu schwer' in texte and 'Auf dem Rückweg wird bei Recklinghausen aufgeladen' in texte
            and 'Ladereihenfolge' in texte)
-    pruefe('Planen: Wartezeit aufs Abholfenster wird erklärt, E-HR 110 startet nach seiner Köln-Fahrt ohne Warten',
-           'Wartet bei Oberhausen bis 09:00 Uhr auf das Abholfenster' in pg.inner_text('.tourkarte[data-lkw="L03"]')
-           and 'Wartet' not in pg.inner_text('.tourkarte[data-lkw="L10"]') and '11:00' in pg.inner_text('.tourkarte[data-lkw="L10"] .tk-kopf'))
     pruefe('Planen: Grund für eine Abholung, die nicht mitfährt', '80 VJR (abholen) nicht mit dazu: auf dem Rückweg 80 VJR kommt die Rampe nicht hoch' in texte)
     pruefe('Planen: „wäre frei, aber“ erklärt ungenutzte freie Lkw mit Datenblattwert', 'E-HR 102 wäre frei, aber: 78 SEC kommt die Rampe nicht hoch: 29 % Steigung, Gerät schafft 25 %' in texte)
-    pruefe('Planen: Spedition mit Grund', 'An Spedition: Manitou 80 VJR Vertikalmastbühne 8 m ausliefern' in texte and 'kein passender Lkw frei' in texte)
-    pruefe('Planen: Fahrt von E-HR 103 vorgewählt, Karte zeigt Hof und 2 Stopps', pg.locator('.tourkarte.gewaehlt[data-lkw="L03"]').count() == 1
-           and pg.locator('.karten-stopp').count() == 2 and pg.locator('.karten-hof').count() == 1)
+    sped = pg.inner_text('#plan-auftraege .sped-zeile[data-spedition="B03"]') if pg.locator('.sped-zeile[data-spedition="B03"]').count() else ''
+    pruefe(f'Planen: Spedition mit Grund ({sped[:60]})', 'Manitou 80 VJR Vertikalmastbühne 8 m ausliefern' in sped and 'kein passender Lkw frei' in sped)
+    frisch(pg); pg.click('#beladung-berechnen'); pg.wait_for_timeout(800)
+    pruefe('Planen: Fahrt von E-HR 103 vorgewählt, Karte zeigt Hof und 2 Stopps', pg.get_attribute('.fahrt-zeile[data-fahrt="L03"]', 'aria-pressed') == 'true'
+           and pg.locator('.fahrt-zeile[aria-pressed="true"]').count() == 1 and pg.locator('.karten-stopp').count() == 2 and pg.locator('.karten-hof').count() == 1
+           and pg.locator('.karten-punkt').count() == 0)
     pg.screenshot(path=str(aus / 'planen.png'))
-    pg.locator('.tourkarte[data-lkw="L10"] .tk-kopf').click(); pg.wait_for_timeout(500)
+    pg.click('.fahrt-zeile[data-fahrt="L10"]'); pg.wait_for_timeout(500)
     pruefe('Planen: Karte fasst Ausliefern und Abholen in Recklinghausen zu einem Marker „1 · 2“ zusammen',
            pg.locator('.karten-stopp').count() == 1 and pg.locator('.karten-stopp b', has_text='1 · 2').count() == 1)
-    pg.locator('.tourkarte[data-lkw="L05"] .tk-kopf').click(); pg.wait_for_timeout(500)
-    pruefe('Planen: andere Fahrt gewählt, Karte zeigt deren 2 Stopps', pg.locator('.karten-stopp').count() == 2 and 'E-HR 105' in pg.inner_text('#karte-titel'))
+    pg.click('.fahrt-zeile[data-fahrt="L05"]'); pg.wait_for_timeout(500)
+    pruefe('Planen: andere Fahrt gewählt, Karte und Kopf zeigen sie', pg.locator('.karten-stopp').count() == 2 and 'E-HR 105' in pg.inner_text('#detail-kopf h2')
+           and pg.get_attribute('.fahrt-zeile[data-fahrt="L05"]', 'aria-pressed') == 'true')
 
-    # Route rechts: Fahrt über die Auswahl wählen, Etappen vom Hof bis zurück, eine Etappe hervorheben
-    pruefe('Route: je Fahrt ein Auswahlknopf, die gewählte ist gedrückt', pg.locator('#fahrt-wahl [data-fahrt]').count() == 7
-           and pg.get_attribute('#fahrt-wahl [data-fahrt="L05"]', 'aria-pressed') == 'true')
-    pg.click('#fahrt-wahl [data-fahrt="L03"]'); pg.wait_for_timeout(500)
+    # Route rechts: Etappen vom Hof bis zurück, eine Etappe hervorheben
+    pg.click('.fahrt-zeile[data-fahrt="L03"]'); pg.wait_for_timeout(500)
     et = pg.locator('#etappen .etappe').all_inner_texts()
-    pruefe(f'Route: E-HR 103 in 3 Etappen Hof → Duisburg → Oberhausen → Hof, mit Abladen, Warten und Aufladen ({[x.splitlines()[1] for x in et]})',
+    pruefe(f'Route: E-HR 103 in 3 Etappen Hof → Duisburg → Oberhausen → Hof, mit Abladen, Warten und Aufladen ({[x.splitlines()[1] for x in et if len(x.splitlines()) > 1]})',
            len(et) == 3 and 'Hof → Duisburg' in et[0] and 'abladen: 2× 78 SEC' in et[0] and 'Duisburg → Oberhausen' in et[1]
-           and 'wartet bis 09:00 Uhr' in et[1] and 'aufladen: 80 VJR' in et[1] and 'Oberhausen → Hof' in et[2] and 'am Hof abladen: 80 VJR' in et[2]
-           and pg.locator('.tourkarte.gewaehlt[data-lkw="L03"]').count() == 1)
+           and 'wartet bis 09:00 Uhr' in et[1] and 'aufladen: 80 VJR' in et[1] and 'Oberhausen → Hof' in et[2] and 'am Hof abladen: 80 VJR' in et[2])
     pg.click('#etappen [data-etappe="1"]'); pg.wait_for_timeout(500)
     linien = pg.evaluate("karte.getSource('route').serialize().data.features.map(f => f.properties.aktiv)")
     pruefe(f'Route: Klick auf Etappe 2 hebt nur diese Strecke hervor ({linien})', linien == [False, True, False]
@@ -130,71 +132,56 @@ with sync_playwright() as p:
     pg.click('#ganze-fahrt'); pg.wait_for_timeout(500)
     pruefe('Route: „Ganze Fahrt zeigen“ hebt alle Etappen wieder hervor', pg.evaluate("karte.getSource('route').serialize().data.features.every(f => f.properties.aktiv)")
            and pg.locator('#etappen [aria-pressed="true"]').count() == 0)
-    pg.click('#fahrt-wahl [data-fahrt="L10"]'); pg.wait_for_timeout(500)
+    pg.click('#etappen [data-etappe="1"]'); pg.wait_for_timeout(300)
+    pg.click('.fahrt-zeile[data-fahrt="L10"]'); pg.wait_for_timeout(500)
     et = pg.locator('#etappen .etappe').all_inner_texts()
-    pruefe(f'Route: Ausliefern und Abholen beim selben Kunden ist eine Etappe „1 · 2“ ({len(et)} Etappen)', len(et) == 2 and et[0].startswith('1 · 2')
-           and 'abladen: MT 1440 · aufladen: GDP3.5N' in et[0])
+    pruefe(f'Route: andere Fahrt beginnt ohne hervorgehobene Etappe; Ausliefern und Abholen beim selben Kunden ist eine Etappe „1 · 2“ ({len(et)} Etappen)',
+           len(et) == 2 and et[0].startswith('1 · 2') and 'abladen: MT 1440 · aufladen: GDP3.5N' in et[0] and pg.locator('#etappen [aria-pressed="true"]').count() == 0)
     pg.click('#etappen [data-etappe="1"]'); pg.wait_for_timeout(500)
     linien = pg.evaluate("karte.getSource('route').serialize().data.features.map(f => f.properties.aktiv)")
     pruefe(f'Route: Rückfahrt nach dem zusammengefassten Stopp hebt den richtigen Kartenabschnitt hervor ({linien})', linien == [False, False, True])
 
-    # Planen: flacher Ladeplan je Fahrt in der Tourkarte (jedes Gerät ein Block mit Stoppnummer), rechts Umschalter Karte / Ladung in 3D
-    bilder = pg.evaluate("""[...document.querySelectorAll('.tourkarte')].map(k => [k.dataset.lkw, k.querySelectorAll('.tk-bild svg').length,
-      k.querySelectorAll('.tk-bild svg [data-geraet]').length, k.querySelectorAll('[data-verschieben]').length])""")
-    pruefe(f'Flacher Ladeplan: jede Fahrt mit Plan, jedes Gerät als Block, gemischte Fahrten (103, 110) mit Hinweg und Rückweg ({bilder})',
-           len(bilder) == 7 and all(n >= 1 and bl == g for _, n, bl, g in bilder) and {x[0]: x[1] for x in bilder}['L03'] == 2 and {x[0]: x[1] for x in bilder}['L10'] == 2
-           and pg.locator('.tourkarte[data-lkw="L03"] .tk-bild small').all_inner_texts() == ['Abfahrt am Hof', 'Rückweg'])
-    nummern = pg.locator('.tourkarte[data-lkw="L03"] .tk-bild svg [data-geraet] text:first-of-type').all_text_contents()  # SVG-Text hat kein innerText
-    pruefe(f'Flacher Ladeplan: Blöcke tragen die Stoppnummer ({nummern})', nummern == ['1', '1', '2'])
-    # Blöcke: echte Rechtecke in Stoppfarbe, ganz im Bildausschnitt, nicht übereinander
-    lage = pg.evaluate("""[...document.querySelectorAll('.tourkarte .tk-bild svg')].map(svg => {
-      const vb = svg.viewBox.baseVal, r = [...svg.querySelectorAll('[data-geraet] rect')].map(e => e.getBBox()).sort((a, b) => a.x - b.x);
-      return { n: r.length, farbe: [...svg.querySelectorAll('[data-geraet] rect')].every(e => /^#[0-9a-f]{6}$/i.test(e.getAttribute('fill'))),
-        drin: r.every(b => b.width > 4 && b.height > 4 && b.x >= vb.x && b.y >= vb.y && b.x + b.width <= vb.x + vb.width && b.y + b.height <= vb.y + vb.height),
-        frei: r.every((b, i) => i === 0 || b.x >= r[i - 1].x + r[i - 1].width - 0.5) }; })""")
-    pruefe(f'Flacher Ladeplan: Blöcke sichtbar, im Bild, ohne Überdeckung ({lage})', len(lage) == 9 and all(x['n'] > 0 and x['farbe'] and x['drin'] and x['frei'] for x in lage))
-    hoch = pg.evaluate("""(() => { const l = finde(LKW, 'L09'), g = GERAETE.reduce((m, x) => (x.h > m.h ? x : m)), svg = seitenansicht(l, [{ g, x: 0.5, zone: l.zonen[l.zonen.length - 1], stopp: 0 }]);
-      document.body.append(svg); const vb = svg.viewBox.baseVal, b = svg.querySelector('[data-geraet] rect').getBBox(); svg.remove();
-      return [g.kurz, b.y >= vb.y]; })()""")
-    pruefe(f'Flacher Ladeplan: höchstes Gerät über 4 m wird nicht abgeschnitten ({hoch})', hoch[1])
-    pruefe('3D Planen: Umschalter sichtbar, Karte gewählt, keine 3D-Fläche', pg.locator('#rechts-wahl').is_visible()
-           and pg.get_attribute('#rechts-wahl [data-rechts="karte"]', 'aria-selected') == 'true' and not pg.locator('#plan-3d').is_visible())
-    pg.click('#rechts-wahl [data-rechts="ladung"]'); pg.wait_for_timeout(600)
-    pruefe('3D Planen: „Ladung in 3D“ zeigt drehbare Szene statt Karte, Hin/Rückweg-Wahl bei gemischter Fahrt',
-           pg.locator('#plan-3d canvas').is_visible() and not pg.locator('#plan-karte').is_visible()
-           and pg.inner_text('#karte-titel') == 'Ladung · E-HR 110' and pg.locator('#rechts-richtung').is_visible())
-    pg.click('#fahrt-wahl [data-fahrt="L04"]'); pg.wait_for_timeout(500)
+    # Ladung in 3D rechts neben der Karte: Hinweg/Rückweg bei gemischten Fahrten, je Gerät eine Auswahl zum Umlegen
+    pruefe('3D Planen: Ladung in 3D und Karte zugleich sichtbar, Hin/Rückweg-Wahl bei gemischter Fahrt', pg.locator('#plan-3d canvas').is_visible()
+           and pg.locator('#plan-karte').is_visible() and pg.locator('#rechts-richtung').is_visible()
+           and pg.get_attribute('#rechts-richtung [data-richtung="hin"]', 'aria-selected') == 'true')
+    teile = pg.evaluate("(() => { let n = 0; planDrei.gruppe.traverse(o => { if (o.isMesh) n++; }); return n; })()")
+    pg.click('#rechts-richtung [data-richtung="rueck"]'); pg.wait_for_timeout(500)
+    teile2 = pg.evaluate("(() => { let n = 0; planDrei.gruppe.traverse(o => { if (o.isMesh) n++; }); return n; })()")
+    pruefe(f'3D Planen: Rückweg gewählt, die Szene zeigt eine andere Ladung ({teile} → {teile2})', pg.get_attribute('#rechts-richtung [data-richtung="rueck"]', 'aria-selected') == 'true'
+           and teile != teile2)
+    pg.click('.fahrt-zeile[data-fahrt="L04"]'); pg.wait_for_timeout(500)
     pruefe('3D Planen: Fahrt nur mit Auslieferung ohne Hin/Rückweg-Wahl', pg.locator('#plan-3d canvas').is_visible() and not pg.locator('#rechts-richtung').is_visible())
-    rbild = pg.locator('.tourkarte[data-lkw="L03"] .tk-bild[data-richtung="rueck"]')
-    if rbild.count(): rbild.click(); pg.wait_for_timeout(500)  # ohne Bild wird die Prüfung rot statt abzubrechen
-    pruefe('3D Planen: Klick aufs Rückweg-Bild wählt die Fahrt und zeigt rechts den Rückweg in 3D',
-           pg.inner_text('#karte-titel') == 'Ladung · E-HR 103' and pg.get_attribute('#rechts-richtung [data-richtung="rueck"]', 'aria-selected') == 'true')
-    pg.click('#etappen [data-etappe="0"]'); pg.wait_for_timeout(500)
-    pruefe('3D Planen: Klick auf eine Etappe schaltet zurück auf die Karte', pg.locator('#plan-karte').is_visible() and not pg.locator('#plan-3d').is_visible()
-           and pg.inner_text('#karte-titel') == 'Route · E-HR 103')
-    pg.click('#fahrt-wahl [data-fahrt="L05"]'); pg.wait_for_timeout(300)
+    zeilen = pg.evaluate("""[...document.querySelectorAll('.fahrt-zeile')].map(b => { b.click(); return [b.dataset.fahrt,
+      document.querySelectorAll('#detail-inhalt [data-verschieben]').length, plan.touren[planGewaehlt].auftraege.length]; })""")
+    pruefe(f'Planen: je Fahrt alle Geräte mit Auswahl zum Umlegen ({zeilen})', len(zeilen) == 7 and all(n == m and n > 0 for _, n, m in zeilen))
+    pg.click('.fahrt-zeile[data-fahrt="L03"]'); pg.wait_for_timeout(300)
 
     # Von Hand umlegen: abgelehnt mit Grund, gelungen, schlechter als Vorschlag, wiederherstellen
-    pg.select_option('[data-verschieben="B03"]', 'L03'); pg.wait_for_timeout(500)
+    def fahrt_mit(auftrag):  # die Fahrt wählen, in der der Auftrag liegt (Speditionsaufträge stehen immer links)
+        lkw = pg.evaluate(f"plan.touren.find(t => t.auftraege.some(a => a.id === '{auftrag}'))?.lkw.id || ''")
+        if lkw: pg.click(f'.fahrt-zeile[data-fahrt="{lkw}"]'); pg.wait_for_timeout(300)
+    fahrt_mit('B03'); pg.select_option('[data-verschieben="B03"]', 'L03'); pg.wait_for_timeout(500)
     m = pg.inner_text('#plan-meldung')
     pruefe(f'Umlegen: Mastbühne auf E-HR 103 abgelehnt mit Grund ({m})', 'passt nicht auf E-HR 103' in m and 'zu schwer' in m and pg.locator('#vorschlag-zurueck').count() == 0)
-    pg.select_option('[data-verschieben="B01"]', 'L01'); pg.wait_for_timeout(500)
+    fahrt_mit('B01'); pg.select_option('[data-verschieben="B01"]', 'L01'); pg.wait_for_timeout(500)
     m = pg.inner_text('#plan-meldung')
     pruefe(f'Umlegen: 78 SEC auf den Transporter abgelehnt ({m})', 'passt nicht auf E-HR 101' in m and 'zu schwer' in m and pg.locator('#vorschlag-zurueck').count() == 0)
-    pg.select_option('[data-verschieben="B07"]', 'L07'); pg.wait_for_timeout(500)
-    pruefe('Umlegen: 140 SC auf E-HR 107 gelingt, ein Lkw mehr wird als schlechter gemeldet',
+    fahrt_mit('B07'); pg.select_option('[data-verschieben="B07"]', 'L07'); pg.wait_for_timeout(500)
+    pruefe('Umlegen: 140 SC auf E-HR 107 gelingt, ein Lkw mehr wird als schlechter gemeldet, die neue Fahrt ist gewählt',
            'liegt jetzt auf E-HR 107' in pg.inner_text('#plan-meldung') and 'schlechter als der Vorschlag' in pg.inner_text('#plan-meldung')
-           and pg.locator('.tourkarte[data-lkw="L07"]').count() == 1 and pg.locator('.tourkarte').count() == 8 and pg.locator('#vorschlag-zurueck').count() == 1)
+           and pg.get_attribute('.fahrt-zeile[data-fahrt="L07"]', 'aria-pressed') == 'true' and pg.locator('.fahrt-zeile').count() == 8 and pg.locator('#vorschlag-zurueck').count() == 1)
     pg.click('#vorschlag-zurueck'); pg.wait_for_timeout(500)
-    pruefe('Umlegen: Vorschlag wiederhergestellt, Fahrt von E-HR 103 wieder gewählt', pg.locator('.tourkarte').count() == 7 and pg.locator('#vorschlag-zurueck').count() == 0
-           and pg.locator('.tourkarte[data-lkw="L07"]').count() == 0 and pg.locator('.tourkarte.gewaehlt[data-lkw="L03"]').count() == 1)
-    pg.select_option('[data-verschieben="B05"]', 'L06'); pg.wait_for_timeout(500)
+    pruefe('Umlegen: Vorschlag wiederhergestellt, Fahrt von E-HR 103 wieder gewählt', pg.locator('.fahrt-zeile').count() == 7 and pg.locator('#vorschlag-zurueck').count() == 0
+           and pg.locator('.fahrt-zeile[data-fahrt="L07"]').count() == 0 and pg.get_attribute('.fahrt-zeile[data-fahrt="L03"]', 'aria-pressed') == 'true')
+    fahrt_mit('B05'); pg.select_option('[data-verschieben="B05"]', 'L06'); pg.wait_for_timeout(500)
     pruefe('Umlegen: GLP2.5N auf belegten E-HR 106 abgelehnt', 'passt nicht auf E-HR 106' in pg.inner_text('#plan-meldung') and pg.locator('#vorschlag-zurueck').count() == 0)
-    pg.select_option('[data-verschieben="B10"]', 'L05'); pg.wait_for_timeout(500)
+    fahrt_mit('B10'); pg.select_option('[data-verschieben="B10"]', 'L05'); pg.wait_for_timeout(500)
     pruefe('Umlegen: MT 1440 auf E-HR 105 abgelehnt, laut Datenblatt zu schwer', 'zu schwer: 10,9 t > 9,0 t Nutzlast' in pg.inner_text('#plan-meldung'))
 
     # Ladeplan aus dem Plan: Hinweg und Rückweg, Stoppnummern, Zurrpunkte, Achslast, zurück zum Plan
-    pg.locator('.tourkarte[data-lkw="L08"] [data-ladeplan]').click(); pg.wait_for_timeout(1500)
+    pg.click('.fahrt-zeile[data-fahrt="L08"]'); pg.wait_for_timeout(300)
+    pg.click('#detail-kopf [data-ladeplan]'); pg.wait_for_timeout(1500)
     werte = pg.inner_text('#lp-werte')
     pruefe(f'Ladeplan: Hinweg passt, Achslast vorn und hinten als Balken', 'Passt' in werte and 'Sattelkupplung' in werte and 'Achsaggregat' in werte
            and pg.locator('#lp-werte [data-wert="achse-vorn"] .balken').count() == 1 and pg.locator('#lp-werte [data-wert="achse-hinten"] .balken').count() == 1)
@@ -205,8 +192,10 @@ with sync_playwright() as p:
     pruefe(f'Ladeplan: hinten steht der erste Kunde ({reihe})', reihe == '1,0')
     pg.screenshot(path=str(aus / 'ladeplan.png'))
     pg.click('#lp-zurueck'); pg.wait_for_timeout(500)
-    pruefe('Ladeplan: „Zurück zum Plan“ behält das Ergebnis', pg.get_attribute('.icons [data-ansicht="planen"]', 'aria-selected') == 'true' and pg.locator('.tourkarte').count() == 7)
-    pg.locator('.tourkarte[data-lkw="L10"] [data-ladeplan]').click(); pg.wait_for_timeout(1500)
+    pruefe('Ladeplan: „Zurück zum Plan“ behält das Ergebnis und die gewählte Fahrt', pg.get_attribute('.icons [data-ansicht="planen"]', 'aria-selected') == 'true'
+           and pg.locator('.fahrt-zeile').count() == 7 and pg.get_attribute('.fahrt-zeile[data-fahrt="L08"]', 'aria-pressed') == 'true')
+    pg.click('.fahrt-zeile[data-fahrt="L10"]'); pg.wait_for_timeout(300)
+    pg.click('#detail-kopf [data-ladeplan]'); pg.wait_for_timeout(1500)
     pruefe('Ladeplan: gemischte Fahrt mit Umschalter Hin/Rück', pg.locator('#lp-richtung').is_visible() and 'MT 1440' in pg.inner_text('#lp-liste'))
     pg.click('#lp-richtung [data-richtung="rueck"]'); pg.wait_for_timeout(800)
     pruefe('Ladeplan: Rückweg zeigt die Abholung und passt', 'GDP3.5N' in pg.inner_text('#lp-liste') and 'Passt auf dem Rückweg' in pg.inner_text('#lp-werte'))
@@ -214,7 +203,7 @@ with sync_playwright() as p:
 
     # Übernehmen: Sammeltouren in der Woche, Aufträge erledigt, bleibt nach Neuladen
     pg.click('#plan-uebernehmen'); pg.wait_for_timeout(600)
-    pruefe('Übernehmen: Meldung und keine offenen Transporte mehr', '7 Touren für Mi 07.10. eingeplant, 2 an Spedition' in pg.inner_text('#plan-ergebnis')
+    pruefe('Übernehmen: Meldung und keine offenen Transporte mehr', '7 Touren für Mi 07.10. eingeplant, 2 an Spedition' in pg.inner_text('#plan-meldung')
            and pg.locator('#plan-auftraege [data-auftrag]').count() == 0)
     pg.reload(); pg.wait_for_timeout(1500)
     pruefe('Übernehmen: 7 Sammeltouren gespeichert, nach Neuladen noch da', pg.evaluate("stand.alleTouren.filter(t => t.art === 'Sammeltour').length") == 7
@@ -294,7 +283,7 @@ with sync_playwright() as p:
     pg.click('#nt-speichern'); pg.wait_for_timeout(800)
     pruefe('Neuer Transport: Kunde, Vertrag, Auslieferung und Abholung angelegt', pg.evaluate("stand.kunden.filter(k => k.firma === 'Test Montage GmbH' && k.plz === '45127').length") == 1
            and pg.evaluate("stand.vertraege.some(v => v.geraet === 'G12' && v.von === '2026-10-08' && v.bis === '2026-10-21' && v.abholen)")
-           and pg.evaluate("stand.alleAuftraege.filter(a => a.geraet === 'G12').map(a => a.art + a.tag).sort().join()") == 'Abholung2026-10-21,Auslieferung2026-10-08')
+           and pg.evaluate("stand.alleAuftraege.filter(a => a.geraet === 'G12' && stand.kunden.some(k => k.id === a.ort)).map(a => a.art + a.tag).sort().join()") == 'Abholung2026-10-21,Auslieferung2026-10-08')
     pruefe('Neuer Transport: Vorschläge zum gleich Einplanen', pg.locator('#nt-vorschlaege [data-vorschlag]').count() >= 1)
     pg.screenshot(path=str(aus / 'neuer_transport.png'))
     pg.locator('#nt-vorschlaege [data-vorschlag] button').first.click(); pg.wait_for_timeout(600)
@@ -334,10 +323,11 @@ with sync_playwright() as p:
     # Lkw fällt aus: Plan rechnet ohne ihn neu, Werkstatt sichtbar, zurückholen
     frisch(pg)
     pg.click('#beladung-berechnen'); pg.wait_for_timeout(800)
+    pg.click('.fahrt-zeile[data-fahrt="L08"]'); pg.wait_for_timeout(300)
     pg.locator('[data-ausfall="L08"]').click(); pg.wait_for_timeout(1500)
     m = pg.inner_text('#plan-meldung')
     pruefe(f'Lkw-Ausfall: E-HR 108 fällt aus, Plan ohne ihn neu berechnet ({m[:60]})', 'E-HR 108 fällt am Mi 07.10. aus' in m and 'neu verteilt' in m
-           and pg.locator('.tourkarte[data-lkw="L08"]').count() == 0 and '14 Transporte auf' in pg.inner_text('#plan-pruef') and pg.locator('[data-zurueckholen="L08"]').count() == 1)
+           and pg.locator('.fahrt-zeile[data-fahrt="L08"]').count() == 0 and '14 Transporte:' in pg.inner_text('#plan-pruef') and pg.locator('[data-zurueckholen="L08"]').count() == 1)
     ansicht(pg, 'plantafel', 500)
     pruefe('Lkw-Ausfall: Woche markiert E-HR 108 als Werkstatt', 'Werkstatt' in pg.locator('.zeile .label', has_text='E-HR 108').inner_text())
     pg.click('.plan-reiter [data-plan="woche"]'); pg.wait_for_timeout(400)
@@ -349,7 +339,7 @@ with sync_playwright() as p:
     pruefe('Lkw-Ausfall: Steckbrief zeigt Werkstatt', 'Werkstatt' in pg.inner_text('.steckbrief[data-lkw="L08"] h3') and 'zurück' in pg.inner_text('[data-werkstatt="L08"]'))
     pg.click('[data-werkstatt="L08"]'); pg.wait_for_timeout(1200)
     ansicht(pg, 'planen', 500)
-    pruefe('Lkw-Ausfall: zurückgeholt, Plan wieder mit E-HR 108', pg.locator('[data-zurueckholen]').count() == 0 and pg.locator('.tourkarte[data-lkw="L08"]').count() == 1
+    pruefe('Lkw-Ausfall: zurückgeholt, Plan wieder mit E-HR 108', pg.locator('[data-zurueckholen]').count() == 0 and pg.locator('.fahrt-zeile[data-fahrt="L08"]').count() == 1
            and 'wieder verfügbar' in pg.inner_text('#plan-meldung'))
 
     # Werkstatt nach dem Übernehmen: Touren des Lkw als Konflikt, Ladeliste gesperrt
@@ -369,7 +359,8 @@ with sync_playwright() as p:
     # decode() künstlich verzögern: gedruckt werden darf erst, wenn die Bilder fertig sind
     pg.evaluate("""(() => { const d = HTMLImageElement.prototype.decode; window.decodeFertig = 0;
       HTMLImageElement.prototype.decode = function () { return new Promise((ok) => setTimeout(ok, 700)).then(() => d.call(this)).then(() => { window.decodeFertig++; }); }; })()""")
-    pg.locator('.tourkarte[data-lkw="L10"] [data-ladeliste]').click(); pg.wait_for_timeout(200)
+    pg.click('.fahrt-zeile[data-fahrt="L10"]'); pg.wait_for_timeout(300)
+    pg.locator('#detail-kopf [data-ladeliste]').click(); pg.wait_for_timeout(200)
     vorher = pg.evaluate('window.gedruckt')
     pg.wait_for_function('window.gedruckt == 1', timeout=5000)
     pruefe(f'Ladeliste: Druck wartet, bis die Bilder geladen sind (nach 0,2 s gedruckt: {vorher})', vorher == 0 and pg.evaluate('window.decodeFertig') == 2)
@@ -379,7 +370,8 @@ with sync_playwright() as p:
     pruefe('Ladeliste: Druck ausgelöst, Hinweg und Rückweg, Adressen, ohne Kettenvorgabe', pg.evaluate('window.gedruckt') == 1 and 'Ladeliste E-HR 110' in druck
            and 'Am Hof aufladen' in druck and 'Unterwegs aufladen' in druck and 'Blitzkuhlenstraße 101' in druck and 'Herr Peters' in druck and 'Kette' not in druck
            and pg.locator('#druck table').count() == 2)
-    pg.locator('.tourkarte[data-lkw="L08"] [data-ladeliste]').click(); pg.wait_for_function('window.gedruckt == 2', timeout=5000)
+    pg.click('.fahrt-zeile[data-fahrt="L08"]'); pg.wait_for_timeout(300)
+    pg.locator('#detail-kopf [data-ladeliste]').click(); pg.wait_for_function('window.gedruckt == 2', timeout=5000)
     reihe = pg.locator('#druck table').first.locator('tr td:nth-child(4)').all_inner_texts()
     pruefe(f'Ladeliste: zuerst aufgeladen wird der letzte Kunde ({reihe})', pg.evaluate('window.gedruckt') == 2 and [x[0] for x in reihe] == ['2', '1'])
     pg.emulate_media(media='print')
@@ -433,25 +425,65 @@ with sync_playwright() as p:
 
     # Speicher: kaputte Stände führen zu Beispieldaten, gültiger Stand wird übernommen
     for name, roh in [
-        ('kaputter Speicher', "{alleTouren:[null], alleSped:[], alleAuftraege:[], vertraege:[], kunden:[], werkstatt:[], nr:1, kosten:{}}"),
-        ('Startzeit als Text', "{alleTouren:[{id:'T1',tag:'2026-10-06',lkw:'L01',fahrer:'F09',geraet:'G12',ort:'du',art:'Abholung',start:'600'}], alleSped:[], alleAuftraege:[], vertraege:[], kunden:[], werkstatt:[], nr:1, kosten:{fahrerStunde:1,spedKm:1,spedGrund:1,schwerFaktor:1}}"),
-        ('ID mit Exponent', "{alleTouren:[{id:'T1e309',tag:'2026-10-06',lkw:'L01',fahrer:'F09',geraet:'G12',ort:'du',art:'Abholung',start:600}], alleSped:[], alleAuftraege:[], vertraege:[], kunden:[], werkstatt:[], nr:1, kosten:{fahrerStunde:1,spedKm:1,spedGrund:1,schwerFaktor:1}}"),
-        ('Sammeltour mit falschem Ort', "{alleTouren:[{id:'T1',tag:'2026-10-07',lkw:'L03',fahrer:'F04',art:'Sammeltour',start:420,stopps:[{ort:'zz',art:'Auslieferung',geraete:['G13']}],auftraege:[]}], alleSped:[], alleAuftraege:[], vertraege:[], kunden:[], werkstatt:[], nr:1, kosten:{fahrerStunde:1,spedKm:1,spedGrund:1,schwerFaktor:1}}"),
-        ('Einzeltour mit kaputtem Stopps-Feld', "{alleTouren:[{id:'T1',tag:'2026-10-06',lkw:'L01',fahrer:'F09',geraet:'G12',ort:'du',art:'Abholung',start:600,stopps:'kaputt'}], alleSped:[], alleAuftraege:[], vertraege:[], kunden:[], werkstatt:[], nr:1, kosten:{fahrerStunde:1,spedKm:1,spedGrund:1,schwerFaktor:1}}"),
-        ('Sammeltour mit fehlendem Auftrag', "{alleTouren:[{id:'T1',tag:'2026-10-07',lkw:'L03',fahrer:'F04',art:'Sammeltour',start:420,stopps:[{ort:'du',art:'Auslieferung',geraete:['G13','G13']}],auftraege:[{id:'B01',tag:'2026-10-07',art:'Auslieferung',geraet:'G13',ort:'du',bis:540}]}], alleSped:[], alleAuftraege:[], vertraege:[], kunden:[], werkstatt:[], nr:1, kosten:{fahrerStunde:1,spedKm:1,spedGrund:1,schwerFaktor:1}}"),
-        ('Sammeltour, die zeitlich nicht aufgeht', "{alleTouren:[{id:'T1',tag:'2026-10-07',lkw:'L03',fahrer:'F04',art:'Sammeltour',start:1020,stopps:[{ort:'ms',art:'Auslieferung',geraete:['G13','G13']}],auftraege:[{id:'B01',tag:'2026-10-07',art:'Auslieferung',geraet:'G13',ort:'ms',bis:1140},{id:'B02',tag:'2026-10-07',art:'Auslieferung',geraet:'G13',ort:'ms',bis:1140}]}], alleSped:[], alleAuftraege:[], vertraege:[], kunden:[], werkstatt:[], nr:5, kosten:{fahrerStunde:1,spedKm:1,spedGrund:1,schwerFaktor:1}}"),
-        ('Auftrags-ID doppelt (offen und in einer Tour)', "{alleTouren:[{id:'T1',tag:'2026-10-07',lkw:'L03',fahrer:'F04',art:'Sammeltour',start:420,stopps:[{ort:'du',art:'Auslieferung',geraete:['G13']}],auftraege:[{id:'B01',tag:'2026-10-07',art:'Auslieferung',geraet:'G13',ort:'du',bis:540}]}], alleSped:[], alleAuftraege:[{id:'B01',tag:'2026-10-07',art:'Auslieferung',geraet:'G14',ort:'du',bis:540}], vertraege:[], kunden:[], werkstatt:[], nr:5, kosten:{fahrerStunde:1,spedKm:1,spedGrund:1,schwerFaktor:1}}"),
-        ('Auftrag am Sonntag', "{alleTouren:[], alleSped:[], alleAuftraege:[{id:'B1',tag:'2026-10-11',art:'Auslieferung',geraet:'G13',ort:'du',bis:540}], vertraege:[], kunden:[], werkstatt:[], nr:1, kosten:{fahrerStunde:1,spedKm:1,spedGrund:1,schwerFaktor:1}}"),
+        ('kaputter Speicher', "{alleTouren:[null], alleSped:[], alleAuftraege:[], vertraege:[], kunden:[], werkstatt:[], nr:1, kosten:{}, heute:HEUTE}"),
+        ('Startzeit als Text', "{alleTouren:[{id:'T1',tag:'2026-10-06',lkw:'L01',fahrer:'F09',geraet:'G12',ort:'du',art:'Abholung',start:'600'}], alleSped:[], alleAuftraege:[], vertraege:[], kunden:[], werkstatt:[], nr:1, kosten:{fahrerStunde:1,spedKm:1,spedGrund:1,schwerFaktor:1}, heute:HEUTE}"),
+        ('ID mit Exponent', "{alleTouren:[{id:'T1e309',tag:'2026-10-06',lkw:'L01',fahrer:'F09',geraet:'G12',ort:'du',art:'Abholung',start:600}], alleSped:[], alleAuftraege:[], vertraege:[], kunden:[], werkstatt:[], nr:1, kosten:{fahrerStunde:1,spedKm:1,spedGrund:1,schwerFaktor:1}, heute:HEUTE}"),
+        ('Sammeltour mit falschem Ort', "{alleTouren:[{id:'T1',tag:'2026-10-07',lkw:'L03',fahrer:'F04',art:'Sammeltour',start:420,stopps:[{ort:'zz',art:'Auslieferung',geraete:['G13']}],auftraege:[]}], alleSped:[], alleAuftraege:[], vertraege:[], kunden:[], werkstatt:[], nr:1, kosten:{fahrerStunde:1,spedKm:1,spedGrund:1,schwerFaktor:1}, heute:HEUTE}"),
+        ('Einzeltour mit kaputtem Stopps-Feld', "{alleTouren:[{id:'T1',tag:'2026-10-06',lkw:'L01',fahrer:'F09',geraet:'G12',ort:'du',art:'Abholung',start:600,stopps:'kaputt'}], alleSped:[], alleAuftraege:[], vertraege:[], kunden:[], werkstatt:[], nr:1, kosten:{fahrerStunde:1,spedKm:1,spedGrund:1,schwerFaktor:1}, heute:HEUTE}"),
+        ('Sammeltour mit fehlendem Auftrag', "{alleTouren:[{id:'T1',tag:'2026-10-07',lkw:'L03',fahrer:'F04',art:'Sammeltour',start:420,stopps:[{ort:'du',art:'Auslieferung',geraete:['G13','G13']}],auftraege:[{id:'B01',tag:'2026-10-07',art:'Auslieferung',geraet:'G13',ort:'du',bis:540}]}], alleSped:[], alleAuftraege:[], vertraege:[], kunden:[], werkstatt:[], nr:1, kosten:{fahrerStunde:1,spedKm:1,spedGrund:1,schwerFaktor:1}, heute:HEUTE}"),
+        ('Sammeltour, die zeitlich nicht aufgeht', "{alleTouren:[{id:'T1',tag:'2026-10-07',lkw:'L03',fahrer:'F04',art:'Sammeltour',start:1020,stopps:[{ort:'ms',art:'Auslieferung',geraete:['G13','G13']}],auftraege:[{id:'B01',tag:'2026-10-07',art:'Auslieferung',geraet:'G13',ort:'ms',bis:1140},{id:'B02',tag:'2026-10-07',art:'Auslieferung',geraet:'G13',ort:'ms',bis:1140}]}], alleSped:[], alleAuftraege:[], vertraege:[], kunden:[], werkstatt:[], nr:5, kosten:{fahrerStunde:1,spedKm:1,spedGrund:1,schwerFaktor:1}, heute:HEUTE}"),
+        ('Auftrags-ID doppelt (offen und in einer Tour)', "{alleTouren:[{id:'T1',tag:'2026-10-07',lkw:'L03',fahrer:'F04',art:'Sammeltour',start:420,stopps:[{ort:'du',art:'Auslieferung',geraete:['G13']}],auftraege:[{id:'B01',tag:'2026-10-07',art:'Auslieferung',geraet:'G13',ort:'du',bis:540}]}], alleSped:[], alleAuftraege:[{id:'B01',tag:'2026-10-07',art:'Auslieferung',geraet:'G14',ort:'du',bis:540}], vertraege:[], kunden:[], werkstatt:[], nr:5, kosten:{fahrerStunde:1,spedKm:1,spedGrund:1,schwerFaktor:1}, heute:HEUTE}"),
+        ('Auftrag am Sonntag', "{alleTouren:[], alleSped:[], alleAuftraege:[{id:'B1',tag:'2026-10-11',art:'Auslieferung',geraet:'G13',ort:'du',bis:540}], vertraege:[], kunden:[], werkstatt:[], nr:1, kosten:{fahrerStunde:1,spedKm:1,spedGrund:1,schwerFaktor:1}, heute:HEUTE}"),
     ]:
         pg.evaluate(f"localStorage.setItem('{SPEICHER}', JSON.stringify({roh}))")
         pg.reload(); pg.wait_for_timeout(1200)
-        pruefe(f'Speicher {name}: Beispieldaten statt Absturz', pg.evaluate('stand.alleAuftraege.length') == 20 and pg.evaluate('stand.alleTouren.length') > 100)
+        pruefe(f'Speicher {name}: Beispieldaten statt Absturz', pg.evaluate('stand.alleAuftraege.length') == pg.evaluate('neuerStand().alleAuftraege.length') >= 23 and pg.evaluate('stand.alleTouren.length') > 100)
     pg.evaluate(f"""localStorage.setItem('{SPEICHER}', JSON.stringify({{alleTouren:[{{id:'T101',tag:'2026-10-07',lkw:'L03',fahrer:'F04',art:'Sammeltour',start:420,
         stopps:[{{ort:'K01',art:'Auslieferung',geraete:['G13','G13']}}],auftraege:[{{id:'B01',tag:'2026-10-07',art:'Auslieferung',geraet:'G13',ort:'K01',bis:540}},{{id:'B02',tag:'2026-10-07',art:'Auslieferung',geraet:'G13',ort:'K01',bis:540}}]}}], alleSped:[], alleAuftraege:[], vertraege:[], kunden:[], werkstatt:[], nr:100,
-        kosten:{{fahrerStunde:38,spedKm:2.4,spedGrund:140,schwerFaktor:2.5}}}}))""")
+        kosten:{{fahrerStunde:38,spedKm:2.4,spedGrund:140,schwerFaktor:2.5}}, heute:HEUTE}}))""")
     pg.reload(); pg.wait_for_timeout(1500)
     pruefe('Speicher: gültige Sammeltour übernommen, ID-Zähler dahinter', pg.evaluate('stand.nr') == 101 and pg.evaluate('stand.alleTouren.length') == 1
            and 8 * 60 < pg.evaluate("ende(stand.alleTouren[0])") < 10 * 60)
+
+    # Demo-Datum folgt dem Öffnungstag: Beispieltag ist der nächste Werktag, danach zwei Folgetage mit Aufträgen
+    TAGE_JS = """(() => { const n = (tag) => stand.alleAuftraege.filter(a => a.tag === tag).length, f = FOLGETAG_NR.map(k => tagPlus(HEUTE, k));
+      const p = beladungVerteilen(stand.alleAuftraege.filter(a => a.tag === ladetag()), ladetag());
+      return { heute: HEUTE, start: datum, folge: f, n: [n(ladetag()), n(f[0]), n(f[1])], plan: [p.touren.length, p.spedition.length],
+        sonntag: stand.alleAuftraege.some(a => istSonntag(a.tag)) }; })()"""
+    frisch(pg)
+    r = pg.evaluate(TAGE_JS)
+    pruefe(f'Datum: am festen Dienstag Beispieltag 07.10. mit 14, Folgetage 08. und 09.10. mit 5 und 4 Aufträgen ({r})', r['start'] == '2026-10-07'
+           and r['folge'] == ['2026-10-08', '2026-10-09'] and r['n'] == [14, 5, 4] and r['plan'] == [7, 2])
+    for name, zeit, heute, start, folge in [
+        ('Freitag', datetime.datetime(2026, 10, 16, 9, 0), '2026-10-16', '2026-10-19', ['2026-10-20', '2026-10-21']),
+        ('Samstag', datetime.datetime(2026, 10, 17, 9, 0), '2026-10-19', '2026-10-20', ['2026-10-21', '2026-10-22']),
+        ('Sonntag spät', datetime.datetime(2026, 10, 18, 23, 30), '2026-10-19', '2026-10-20', ['2026-10-21', '2026-10-22']),
+        ('Donnerstag im Dezember', datetime.datetime(2026, 12, 31, 8, 0), '2026-12-31', '2027-01-01', ['2027-01-04', '2027-01-05']),
+    ]:
+        d = b.new_page(); d.clock.set_fixed_time(zeit)
+        d.on('pageerror', lambda e: fehler.append(f'Datum: {e}'))
+        d.goto(seite); d.wait_for_timeout(300); d.evaluate(f"localStorage.clear(); localStorage.setItem('{RUNDGANG}', 'ja')"); d.reload(); d.wait_for_timeout(1200)
+        r = d.evaluate(TAGE_JS)
+        pruefe(f'Datum {name}: heute {heute}, Start auf dem Beispieltag {start} mit 14 Aufträgen, Folgetage {folge} mit 5 und 4, Plan 7 + 2 ({r})',
+               r['heute'] == heute and r['start'] == start and r['folge'] == folge and r['n'] == [14, 5, 4] and r['plan'] == [7, 2] and not r['sonntag']
+               and d.locator('#auftrag-liste [data-auftrag]').count() == 14)
+        d.close()
+    # Ein gespeicherter Stand vom Vortag wird verworfen: sonst lägen seine Aufträge in der Vergangenheit
+    d = b.new_page(); d.clock.set_fixed_time(datetime.datetime(2026, 10, 12, 9, 0))
+    d.goto(seite); d.wait_for_timeout(300); d.evaluate(f"localStorage.clear(); localStorage.setItem('{RUNDGANG}', 'ja')"); d.reload(); d.wait_for_timeout(1200)
+    d.evaluate("stand.alleAuftraege = stand.alleAuftraege.filter(a => a.id !== 'B01'); speichern(); 0")
+    d.reload(); d.wait_for_timeout(1200)
+    gleich = d.evaluate("stand.alleAuftraege.some(a => a.id === 'B01')")
+    d.clock.set_fixed_time(datetime.datetime(2026, 10, 13, 9, 0)); d.reload(); d.wait_for_timeout(1200)
+    pruefe(f'Datum: Stand bleibt am selben Tag, am nächsten Tag frische Beispieldaten ab dem 14.10. (gleicher Tag mit B01: {gleich})',
+           not gleich and d.evaluate("stand.alleAuftraege.some(a => a.id === 'B01' && a.tag === '2026-10-14')") and d.evaluate('stand.heute') == '2026-10-13')
+    d.close()
+    # Ohne eingefrorene Uhr: echtes heutiges Datum
+    d = b.new_page(); d.goto(seite); d.wait_for_timeout(300); d.evaluate(f"localStorage.clear(); localStorage.setItem('{RUNDGANG}', 'ja')"); d.reload(); d.wait_for_timeout(1200)
+    echt = d.evaluate("(() => { const n = new Date(), t = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`; return [t, HEUTE, datum]; })()")
+    pruefe(f'Datum: ohne eingefrorene Uhr gilt der echte Tag, gestartet wird danach mit 14 Aufträgen ({echt})', (echt[0] == echt[1] or wochentag_py(echt[0]) in (5, 6))
+           and echt[2] > echt[0] and d.locator('#auftrag-liste [data-auftrag]').count() == 14)
+    d.close()
 
     # Modelle liegen innerhalb ihrer Transportmaße
     passt = pg.evaluate("""GERAETE.every(g => { const m = geraetKoerper(g); m.updateMatrixWorld(true); const b = new THREE.Box3().setFromObject(m);
@@ -607,6 +639,7 @@ with sync_playwright() as p:
       for (let i = 0; i < boxen.length; i++) for (let j = i + 1; j < boxen.length; j++) {
         const a = boxen[i], b = boxen[j];
         if (a.e.contains(b.e) || b.e.contains(a.e)) continue;
+        if (!a.e.closest('.plan-aktionen') !== !b.e.closest('.plan-aktionen')) continue; // Knopfleiste klebt unten, die Liste rollt darunter durch
         const x = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left), y = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
         if (x > 2 && y > 2) ueberlappt.push(name(a.e) + ' / ' + name(b.e));
       }
@@ -618,6 +651,7 @@ with sync_playwright() as p:
     })()"""
     for (tw, th) in [(1180, 820), (820, 1180), (1366, 1024)]:
         t = b.new_page(viewport={'width': tw, 'height': th}, has_touch=True)
+        t.clock.set_fixed_time(DEMO_ZEIT)
         t.on('pageerror', lambda e: fehler.append(f'Tablet: {e}'))
         t.goto(seite); t.wait_for_timeout(2500)
         z = t.evaluate(LAYOUT_JS)
@@ -644,6 +678,7 @@ with sync_playwright() as p:
 
     # Handy
     m = b.new_page(viewport={'width': 390, 'height': 844}, has_touch=True)
+    m.clock.set_fixed_time(DEMO_ZEIT)
     m.on('pageerror', lambda e: fehler.append('Handy: ' + str(e)))
     m.goto(seite); m.wait_for_timeout(2500)
     lage = m.evaluate("""(() => { const k = document.querySelector('.rg-karte').getBoundingClientRect(); return k.left >= 0 && k.right <= innerWidth; })()""")
