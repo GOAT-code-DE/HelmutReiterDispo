@@ -130,7 +130,11 @@ function ergebnisKopf() {
 function fahrtZeile(t, i) {
   const gewaehlt = i === planGewaehlt;
   return el('button', { class: 'fahrt-zeile', 'aria-pressed': String(gewaehlt), 'data-fahrt': t.lkw.id, 'data-stopps': String(t.halte.length),
-    onclick: () => { planGewaehlt = i; renderPlanen(); } },
+    onclick: () => { // nur Auswahl und rechte Seite wechseln; die Liste links bleibt stehen (aufgeklappte Transporte, Fokus)
+      planGewaehlt = i; richtung3d = 'hin';
+      document.querySelectorAll('.fahrt-zeile').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.fahrt === t.lkw.id)));
+      renderDetail();
+    } },
   el('span', { class: 'fz-kopf' }, el('b', {}, t.lkw.kz), el('small', {}, t.lkw.typ), el('span', { class: 'fz-zeit' }, `${hhmm(t.start)}–${hhmm(t.ende)}`)),
   el('span', { class: 'fz-stopps' }, ...t.halte.map((h, k) => el('span', {}, el('span', { class: 'stopp-nr klein', style: `background:${stoppFarbe(k)}` }, String(k + 1)),
     `${ortKurz(h.ort)}${h.art === 'Abholung' ? ' (abholen)' : ''}`))),
@@ -139,6 +143,14 @@ function fahrtZeile(t, i) {
 
 let etappe = null; // { t, i }: gewählte Etappe i der Fahrt t
 let richtung3d = 'hin'; // bei gemischten Fahrten: Ladung bei Abfahrt am Hof oder auf dem Rückweg
+// Nur die 3D-Ladung und ihren Umschalter neu zeichnen; Karte, Etappen und Stopps bleiben, wie sie sind
+function ladungZeigen(t) {
+  const teile = ladungTeile(t);
+  if (!teile.some((x) => x.richtung === richtung3d)) richtung3d = teile[0]?.richtung || 'hin';
+  $('#rechts-richtung').hidden = teile.length < 2;
+  document.querySelectorAll('#rechts-richtung [data-richtung]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.richtung === richtung3d)));
+  if (teile.length) planDreiZeigen(t.lkw, teile.find((x) => x.richtung === richtung3d).plaetze);
+}
 function renderDetail() {
   const t = plan?.touren[planGewaehlt], warLeer = $('.plan-detail').classList.contains('leer');
   $('.plan-detail').classList.toggle('leer', !t);
@@ -164,11 +176,7 @@ function renderDetail() {
       knopf('Ladeliste drucken', { class: 'knopf zweit klein', 'data-ladeliste': l.id }, () => ladelisteDrucken(t, datum)),
       knopf('Lkw fällt aus', { class: 'knopf zweit klein', 'data-ausfall': l.id }, () => werkstattSetzen(l.id, true)))));
 
-  const teile = ladungTeile(t);
-  if (!teile.some((x) => x.richtung === richtung3d)) richtung3d = teile[0]?.richtung || 'hin';
-  $('#rechts-richtung').hidden = teile.length < 2;
-  document.querySelectorAll('#rechts-richtung [data-richtung]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.richtung === richtung3d)));
-  if (teile.length) planDreiZeigen(l, teile.find((x) => x.richtung === richtung3d).plaetze);
+  ladungZeigen(t);
 
   const aktiv = etappe?.t === t ? etappe.i : null, waehlen = (i) => { etappe = i === null ? null : { t, i }; renderDetail(); };
   const liste = etappenVon(t);
@@ -969,7 +977,7 @@ function waehleAnsicht(name) {
   $('.app').dataset.ansicht = name;
   document.querySelectorAll('.icons button[data-ansicht]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.ansicht === name)));
   for (const v of ANSICHTEN) $('#v-' + v).hidden = v !== name;
-  if (name === 'planen') { renderPlanen(); karte?.resize(); }
+  if (name === 'planen') { karte?.resize(); renderPlanen(); } // erst neu messen, die Ansicht war versteckt; sonst passt die Karte auf ein falsches Maß ein
   if (name === 'ladeplan') renderLadeplan();
   if (name === 'plantafel') renderPlan();
   if (name === 'fuhrpark') renderFuhrpark();
@@ -1002,7 +1010,7 @@ $('#tag-zurueck').addEventListener('click', () => datumSetzen(tagPlus(datum, -1)
 $('#tag-vor').addEventListener('click', () => datumSetzen(tagPlus(datum, 1)));
 $('#tag-heute').addEventListener('click', () => datumSetzen(HEUTE));
 $('#rundgang-knopf').addEventListener('click', rundgangStarten);
-document.querySelectorAll('#rechts-richtung [data-richtung]').forEach((b) => b.addEventListener('click', () => { richtung3d = b.dataset.richtung; renderDetail(); }));
+document.querySelectorAll('#rechts-richtung [data-richtung]').forEach((b) => b.addEventListener('click', () => { richtung3d = b.dataset.richtung; ladungZeigen(plan.touren[planGewaehlt]); }));
 $('#kunden-neu').addEventListener('click', () => transportOeffnen('neu'));
 $('#kunden-suche').addEventListener('input', (e) => { kf.suche = e.target.value; renderKunden(); });
 document.querySelectorAll('#kunden-filter button').forEach((b) => b.addEventListener('click', () => { kf.filter = b.dataset.filter; renderKunden(); }));

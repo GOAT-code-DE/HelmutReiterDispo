@@ -104,17 +104,22 @@ function szeneFuellen(d, inhalt) {
 function ladungGruppe(l, plaetze, beschriftung, warn = false, mitGrenze = true) {
   const grp = new THREE.Group();
   grp.add(lkwModell(l));
-  let kante = -Infinity, stufe = 0; // Schilder, die sich mit dem vorigen überdecken würden, eine Stufe höher
-  for (const p of [...plaetze].sort((a, b) => a.x - b.x)) {
+  // Ein Schild, das ein schon gesetztes berühren würde, rückt so weit nach oben, bis es frei ist. Die Breite zählt 1,5-fach,
+  // weil die Schrägansicht die Abstände entlang der Ladefläche staucht; der Abstand nach oben ist reichlich, weil der Blick von oben ihn ebenfalls staucht.
+  // Gesetzt wird von der Rampe nach vorn: Die Kamera steht schräg hinten, ein vorderes Schild liegt weiter weg und wirkt ohnehin höher,
+  // also weicht es nach oben aus und nicht das hintere auf es zu.
+  const gesetzt = []; // [links, rechts, unten, oben]
+  for (const p of [...plaetze].sort((a, b) => b.x - a.x)) {
     const k = geraetKoerper(p.g, warn);
     k.position.set(p.x + p.g.l / 2, p.zone.hoehe, 0);
     grp.add(k);
     const [text, farbe, groesse] = beschriftung(p);
     const sch = schild(text, warn ? '#c0392b' : farbe, undefined, groesse);
-    const mitte = p.x + p.g.l / 2, b = sch.scale.x;
-    stufe = mitte - b / 2 < kante ? (stufe + 1) % 3 : 0;
-    kante = mitte + b / 2;
-    sch.position.set(mitte, p.zone.hoehe + p.g.h + 0.7 + stufe * (sch.scale.y + 0.15), 0);
+    const mitte = p.x + p.g.l / 2, halb = sch.scale.x * 0.75, hoch = sch.scale.y / 2 + 0.3;
+    let y = p.zone.hoehe + p.g.h + 0.7;
+    while (gesetzt.some(([l, r, u, o]) => mitte - halb < r && l < mitte + halb && y - hoch < o && u < y + hoch)) y += 0.1;
+    gesetzt.push([mitte - halb, mitte + halb, y - hoch, y + hoch]);
+    sch.position.set(mitte, y, 0);
     grp.add(sch);
   }
   grp.position.x = -(l.laenge - 2.4) / 2;

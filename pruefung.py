@@ -145,13 +145,34 @@ with sync_playwright() as p:
     pruefe('3D Planen: Ladung in 3D und Karte zugleich sichtbar, Hin/Rückweg-Wahl bei gemischter Fahrt', pg.locator('#plan-3d canvas').is_visible()
            and pg.locator('#plan-karte').is_visible() and pg.locator('#rechts-richtung').is_visible()
            and pg.get_attribute('#rechts-richtung [data-richtung="hin"]', 'aria-selected') == 'true')
-    teile = pg.evaluate("(() => { let n = 0; planDrei.gruppe.traverse(o => { if (o.isMesh) n++; }); return n; })()")
+    teile = pg.evaluate("(() => { let n = 0; planDrei.gruppe.traverse(o => { if (o.isMesh) n++; }); window.markerVorher = karteMarker[0]; return n; })()")
     pg.click('#rechts-richtung [data-richtung="rueck"]'); pg.wait_for_timeout(500)
+    pruefe('3D Planen: der Umschalter Hin/Rück zeichnet nur die 3D-Ladung neu, die Karte bleibt stehen', pg.evaluate('karteMarker[0] === window.markerVorher'))
     teile2 = pg.evaluate("(() => { let n = 0; planDrei.gruppe.traverse(o => { if (o.isMesh) n++; }); return n; })()")
     pruefe(f'3D Planen: Rückweg gewählt, die Szene zeigt eine andere Ladung ({teile} → {teile2})', pg.get_attribute('#rechts-richtung [data-richtung="rueck"]', 'aria-selected') == 'true'
            and teile != teile2)
+    pg.click('.offen-klapp summary'); pg.wait_for_timeout(200)
+    pg.click('.fahrt-zeile[data-fahrt="L03"]'); pg.wait_for_timeout(500)
+    pruefe('Planen: Fahrtwechsel lässt „Alle Transporte“ aufgeklappt und beginnt mit der Abfahrt am Hof', pg.evaluate("document.querySelector('.offen-klapp').open")
+           and pg.get_attribute('#rechts-richtung [data-richtung="hin"]', 'aria-selected') == 'true')
     pg.click('.fahrt-zeile[data-fahrt="L04"]'); pg.wait_for_timeout(500)
     pruefe('3D Planen: Fahrt nur mit Auslieferung ohne Hin/Rückweg-Wahl', pg.locator('#plan-3d canvas').is_visible() and not pg.locator('#rechts-richtung').is_visible())
+    # Schilder in 3D: auf dem Bildschirm gemessen (Ecken der Sprites projiziert) überdeckt sich keins mit einem anderen, in jeder Fahrt und Richtung
+    SCHILDER_JS = """(() => { const k = planDrei.kamera, rechts = new THREE.Vector3(), hoch = new THREE.Vector3(), boxen = [];
+      k.updateMatrixWorld(); rechts.setFromMatrixColumn(k.matrixWorld, 0); hoch.setFromMatrixColumn(k.matrixWorld, 1);
+      planDrei.gruppe.traverse(o => { if (!o.isSprite) return; const m = o.getWorldPosition(new THREE.Vector3()), xs = [], ys = [];
+        for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { const p = m.clone().addScaledVector(rechts, a * o.scale.x / 2).addScaledVector(hoch, b * o.scale.y / 2).project(k); xs.push(p.x); ys.push(p.y); }
+        boxen.push([Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]); });
+      let n = 0; for (let i = 0; i < boxen.length; i++) for (let j = i + 1; j < boxen.length; j++) { const [a, b] = [boxen[i], boxen[j]];
+        if (a[0] < b[1] && b[0] < a[1] && a[2] < b[3] && b[2] < a[3]) n++; }
+      return [boxen.length, n]; })()"""
+    schilder = []
+    for f in pg.locator('.fahrt-zeile').evaluate_all('l => l.map(b => b.dataset.fahrt)'):
+        pg.click(f'.fahrt-zeile[data-fahrt="{f}"]'); pg.wait_for_timeout(250)
+        for r in (['hin', 'rueck'] if pg.locator('#rechts-richtung').is_visible() else ['hin']):
+            if r == 'rueck': pg.click('#rechts-richtung [data-richtung="rueck"]'); pg.wait_for_timeout(250)
+            schilder.append((f, r, *pg.evaluate(SCHILDER_JS)))
+    pruefe(f'3D Planen: kein Schild überdeckt ein anderes ({[s for s in schilder if s[3]]})', len(schilder) >= 9 and all(s[2] >= 1 and s[3] == 0 for s in schilder))
     zeilen = pg.evaluate("""[...document.querySelectorAll('.fahrt-zeile')].map(b => { b.click(); return [b.dataset.fahrt,
       document.querySelectorAll('#detail-inhalt [data-verschieben]').length, plan.touren[planGewaehlt].auftraege.length]; })""")
     pruefe(f'Planen: je Fahrt alle Geräte mit Auswahl zum Umlegen ({zeilen})', len(zeilen) == 7 and all(n == m and n > 0 for _, n, m in zeilen))
