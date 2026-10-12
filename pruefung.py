@@ -57,6 +57,10 @@ with sync_playwright() as p:
     for i in range(8):
         lage = pg.evaluate(LAGE_RG)
         schritte.append(lage['loch'] and lage['karte'])
+        if i == 7:
+            links = pg.locator('.rg-karte a').evaluate_all('l => l.map(a => a.getAttribute("href"))')
+            pruefe(f'Rundgang Schritt 8: Website und Ansprechpartner mit E-Mail und Telefon ({links})', links == ['https://www.goat-code.de',
+                   'mailto:fabian.vanboxem@goat-code.de', 'tel:+4917624383999'] and 'Ansprechpartner: Fabian van Boxem' in pg.inner_text('.rg-karte'))
         pg.click('#rg-weiter'); pg.wait_for_timeout(400)
     pruefe(f'Rundgang: 8 Schritte, Ziel und Karte jeweils ganz im Bild {schritte}', all(schritte))
     pruefe('Rundgang: nach „Fertig“ geschlossen, Plan berechnet', pg.locator('.rundgang').count() == 0 and pg.locator('.fahrt-zeile').count() == 7)

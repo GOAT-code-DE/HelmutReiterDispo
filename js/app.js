@@ -914,7 +914,10 @@ const RUNDGANG = [
   { ziel: () => $('#detail-3d'), titel: () => 'Die Ladung in 3D',
     text: () => 'So steht jedes Gerät auf der Ladefläche, mit Stoppnummer, Zonen und Zurrpunkten; zum Drehen seitlich ziehen. Im Ladeplan lässt sich alles nachprüfen und ändern. Die Ladeliste für den Fahrer gibt es zum Drucken; fällt ein Lkw aus, rechnet der Plan sofort neu.' },
   { ziel: () => $('.marken'), titel: () => 'Made by GOAT code',
-    text: () => 'Diesen Rundgang gibt es jederzeit wieder über den Knopf „Rundgang“ oben.' },
+    text: () => ['Diesen Rundgang gibt es jederzeit wieder über den Knopf „Rundgang“ oben. Mehr über uns auf ',
+      el('a', { href: 'https://www.goat-code.de', target: '_blank', rel: 'noopener' }, 'www.goat-code.de'), '.',
+      el('span', { class: 'rg-kontakt' }, el('b', {}, 'Ansprechpartner: Fabian van Boxem'),
+        el('a', { href: 'mailto:fabian.vanboxem@goat-code.de' }, 'fabian.vanboxem@goat-code.de'), el('a', { href: 'tel:+4917624383999' }, '+49 176 24383999'))] },
 ];
 // Rundgang: die erste Fahrt wählen, auf die bed passt (sonst bleibt die Auswahl)
 function fahrtWaehlen(bed) { const i = plan ? plan.touren.findIndex(bed) : -1; if (i >= 0 && i !== planGewaehlt) { planGewaehlt = i; renderPlanen(); } }
@@ -944,7 +947,7 @@ function rundgangZeigen() {
   s.vorher?.();
   const weiter = knopf(letzter ? 'Fertig' : 'Weiter', { class: 'knopf', id: 'rg-weiter' }, () => { if (letzter) rundgangEnde(); else { rg.schritt++; rundgangZeigen(); } });
   const karte = el('div', { class: 'rg-karte' },
-    el('h2', { id: 'rg-titel' }, s.titel()), el('p', {}, s.text()),
+    el('h2', { id: 'rg-titel' }, s.titel()), el('p', {}, ...[].concat(s.text())), // Text oder Liste aus Text und Elementen
     el('div', { class: 'rg-fuss' }, el('span', { class: 'rg-zahl' }, `${rg.schritt + 1} von ${RUNDGANG.length}`),
       knopf('Überspringen', { class: 'knopf zweit', id: 'rg-ueberspringen' }, rundgangEnde),
       ...(rg.schritt ? [knopf('Zurück', { class: 'knopf zweit', id: 'rg-zurueck' }, () => { rg.schritt--; rundgangZeigen(); })] : []),
