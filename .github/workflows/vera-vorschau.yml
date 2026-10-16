@@ -1,0 +1,163 @@
+# VERA-Vorschau, eigenstaendige Fassung (empfohlen): jeder Push wird eine neue Vorschau-Version
+# im passenden VERA-Projekt. Ohne Secret, ohne zentrales Repository, ohne "uses:" auf ein anderes
+# Repository.
+#
+# Einrichtung je Projekt-Repository:
+#   1. Diese Datei als .github/workflows/vera-vorschau.yml ins Repository legen.
+#   2. Unten unter "env:" VERA_URL eintragen (bei Build-Projekten auch BUILD und ORDNER).
+#   3. In VERA am Projekt unter Links die Adresse des Repositorys mit der Art "Repository"
+#      eintragen. Committen, pushen, fertig.
+#
+# Anmeldung: GitHub stellt dem Lauf ein signiertes OIDC-Token aus (permissions: id-token: write),
+# VERA prueft es (Organisation, Repository, Commit) und nimmt Repository und Commit nur daraus.
+# Voraussetzung in VERA (einmal je Organisation, .env): GITHUB_OIDC_ORGANISATIONEN und
+# GITHUB_OIDC_ORGANISATION_IDS, siehe werkzeuge/github/README.md im VERA-Repository.
+#
+# Rueckfall fuer Repositories ausserhalb der freigegebenen Organisation: Secret VERA_TOKEN
+# (API-Zugang mit dem Recht vorschau_hochladen) im Repository anlegen; ist es gesetzt, meldet
+# sich der Lauf damit an (Endpunkt /api/v1/vorschauen/github) statt per OIDC.
+
+name: VERA-Vorschau
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  # Adresse von VERA, ohne Schraegstrich am Ende (Pflicht)
+  VERA_URL: "https://vera.goat-code.de"
+  # Ordner mit der fertigen Website, relativ zum Repository. "." = alles (statische Seite);
+  # bei Build-Projekten der Ausgabeordner, z. B. dist
+  ORDNER: "."
+  # Befehl zum Bauen, z. B. "npm ci && npm run build". Leer: nichts bauen
+  BUILD: ""
+  # Node-Version fuer den Build (nur mit BUILD)
+  NODE_VERSION: "lts/*"
+  # Startdatei der Vorschau. Leer: index.html
+  STARTDATEI: ""
+  # Nur falls das Repository mehreren Projekten zugeordnet ist: Projektcode in VERA
+  PROJEKTCODE: ""
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  vorschau:
+    name: Vorschau nach VERA
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Mehrere Pushes kurz hintereinander: nur der neueste zaehlt
+    concurrency:
+      group: vera-vorschau-${{ github.repository }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Auschecken
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Node einrichten
+        if: env.BUILD != ''
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Bauen
+        if: env.BUILD != ''
+        run: |
+          echo "Baue mit: $BUILD"
+          bash -euo pipefail -c "$BUILD"
+
+      - name: Ordner zippen
+        run: |
+          set -euo pipefail
+          ZIP="$RUNNER_TEMP/vera-vorschau.zip"
+          if [ ! -d "$ORDNER" ]; then
+            echo "::error title=VERA-Vorschau::Ordner '$ORDNER' gibt es nicht. Bei Build-Projekten ORDNER auf den Ausgabeordner setzen (z. B. dist) und BUILD angeben."
+            exit 1
+          fi
+          cd "$ORDNER"
+          # Nur Dateien; ohne .git, .github, node_modules und Dotfiles, ausser .well-known
+          find . -type f \
+            ! -path './.git/*' ! -path '*/node_modules/*' \
+            \( -path '*/.well-known/*' -o ! -path '*/.*' \) \
+            | sed 's|^\./||' | LC_ALL=C sort > "$RUNNER_TEMP/vera-dateien.txt"
+          anzahl=$(wc -l < "$RUNNER_TEMP/vera-dateien.txt" | tr -d ' ')
+          if [ "$anzahl" -eq 0 ]; then
+            echo "::error title=VERA-Vorschau::Im Ordner '$ORDNER' liegen keine Dateien."
+            exit 1
+          fi
+          python3 - "$ZIP" "$RUNNER_TEMP/vera-dateien.txt" <<'PY'
+          import sys, zipfile
+          ziel, liste = sys.argv[1], sys.argv[2]
+          with open(liste, encoding="utf-8") as f, zipfile.ZipFile(ziel, "w", zipfile.ZIP_DEFLATED) as z:
+              for name in (zeile.rstrip("\n") for zeile in f):
+                  if name:
+                      z.write(name, name)
+          PY
+          echo "$anzahl Dateien gepackt, $(du -h "$ZIP" | cut -f1)."
+
+      - name: An VERA senden
+        env:
+          VERA_TOKEN: ${{ secrets.VERA_TOKEN }}
+          PYTHONIOENCODING: utf-8
+        run: |
+          # Ohne -e: den Fehler von curl selbst auswerten und die Meldung von VERA ausgeben
+          set +e -uo pipefail
+          VERA_URL="${VERA_URL%/}"
+          if [ -z "$VERA_URL" ] || [ "$VERA_URL" = "https://vera.example.com" ]; then
+            echo "::error title=VERA-Vorschau::VERA_URL oben in der Workflow-Datei eintragen."
+            exit 1
+          fi
+          ZIP="$RUNNER_TEMP/vera-vorschau.zip"
+          ANTWORT="$RUNNER_TEMP/vera-antwort.json"
+          # Erste Zeile der Commit-Message, ueber git statt Ausdruck (keine Einschleusung)
+          NACHRICHT=$(git log -1 --format=%s "$GITHUB_SHA" 2>/dev/null || true)
+          extra=()
+          [ -n "$STARTDATEI" ] && extra+=(--form-string "startdatei=$STARTDATEI")
+          [ -n "$PROJEKTCODE" ] && extra+=(--form-string "projektcode=$PROJEKTCODE")
+          if [ -n "${VERA_TOKEN:-}" ]; then
+            # Rueckfall: VERA-API-Token, Repository und Commit als Felder
+            ZIEL="$VERA_URL/api/v1/vorschauen/github"
+            TOKEN="$VERA_TOKEN"
+            extra+=(--form-string "repository=$GITHUB_REPOSITORY" --form-string "commit=$GITHUB_SHA" \
+                    --form-string "branch=$GITHUB_REF_NAME")
+          else
+            # Standard: OIDC-Token von GitHub, Audience = Adresse von VERA
+            if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+              echo "::error title=VERA-Vorschau::Kein OIDC-Token verfügbar: 'permissions: id-token: write' fehlt."
+              exit 1
+            fi
+            AUD=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$VERA_URL")
+            TOKEN=$(curl --silent --show-error --fail --retry 3 \
+              -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$AUD" \
+              | python3 -c 'import json, sys; print(json.load(sys.stdin)["value"])')
+            if [ -z "$TOKEN" ]; then
+              echo "::error title=VERA-Vorschau::OIDC-Token von GitHub nicht erhalten."
+              exit 1
+            fi
+            echo "::add-mask::$TOKEN"
+            ZIEL="$VERA_URL/api/v1/vorschauen/github-oidc"
+          fi
+          # --form-string: Texte nie als Datei lesen (ein Wert mit @ oder < am Anfang)
+          http=$(curl --silent --show-error --fail-with-body --retry 3 --max-time 300 \
+            -H "Authorization: Bearer $TOKEN" \
+            -F "datei=@$ZIP;type=application/zip" \
+            --form-string "nachricht=$NACHRICHT" \
+            "${extra[@]}" \
+            -o "$ANTWORT" -w '%{http_code}' \
+            "$ZIEL")
+          rc=$?
+          feld() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1], encoding="utf-8")); print(d.get(sys.argv[2], ""))' "$ANTWORT" "$1" 2>/dev/null || true; }
+          if [ $rc -ne 0 ]; then
+            text=$(feld fehler)
+            [ -z "$text" ] && text=$(head -c 500 "$ANTWORT" 2>/dev/null || true)
+            echo "::error title=VERA-Vorschau (HTTP $http)::${text:-keine Antwort von VERA (curl $rc)}"
+            exit 1
+          fi
+          zeile="VERA: Projekt $(feld projektcode), Version $(feld version), freigegeben: $(feld freigegeben). $(feld hinweis)"
+          echo "$zeile"
+          echo "$zeile" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
